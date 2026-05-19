@@ -12,6 +12,7 @@ from .aerodynamics import (
 from .transformer import Transformer
 from .transolver import Transolver
 from .upt import UPT
+from .divfree_aerodynamics import DivFreeAeroABUPT
 
 __all__ = [
     "AnchoredBranchedUPT",
@@ -24,4 +25,5 @@ __all__ = [
     "AeroTransolver",
     "AeroTransolverConfig",
     "AeroUPT",
+    "DivFreeAeroABUPT",
 ]
