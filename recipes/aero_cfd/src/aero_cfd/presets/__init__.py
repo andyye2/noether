@@ -6,6 +6,7 @@ from .drivaerml import DrivAerMLPreset
 from .drivaernet import DrivAerNetPreset
 from .emmi_wing import EmmiWingPreset
 from .shapenet_car import ShapeNetCarPreset
+from .shapenet_car_divfree import ShapeNetCarDivFreePreset
 
 __all__ = [
     "AeroCFDPreset",
@@ -15,4 +16,5 @@ __all__ = [
     "DrivAerNetPreset",
     "EmmiWingPreset",
     "ShapeNetCarPreset",
+    "ShapeNetCarDivFreePreset",
 ]

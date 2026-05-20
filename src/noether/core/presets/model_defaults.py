@@ -152,4 +152,5 @@ MODEL_DEFAULTS: dict[str, Any] = {
     "noether.modeling.models.aerodynamics.AeroUPT": _apply_upt_defaults,
     "noether.modeling.models.aerodynamics.AeroTransformer": _apply_transformer_defaults,
     "noether.modeling.models.aerodynamics.AeroTransolver": _apply_transolver_defaults,
+    "noether.modeling.models.divfree_aerodynamics.DivFreeAeroABUPT": _apply_abupt_defaults,
 }

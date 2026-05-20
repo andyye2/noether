@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from noether.core.schemas.schema import ConfigSchema
+from noether.core.schemas.models.divfree_ab_upt import DivFreeAnchorBranchedUPTConfig
 from tests.integration.training_pipelines.fixtures.helpers import (
     make_run_dirs,
     train_and_assert_weights_changed,
@@ -15,6 +16,7 @@ from tests.integration.training_pipelines.fixtures.helpers import (
 from tests.integration.training_pipelines.fixtures.synthetic_datasets import StubShapeNetCarDataset
 
 _TRAINER_KIND = "noether.training.trainers.WeightedLossTrainer"
+_DIVFREE_KIND = "noether.modeling.models.divfree_aerodynamics.DivFreeAeroABUPT"
 
 _SHAPENET_FIELD_WEIGHTS = {"surface_pressure": 1.0, "volume_velocity": 1.0}
 _DRIVAERML_FIELD_WEIGHTS = {
@@ -35,6 +37,17 @@ def stubbed_shapenet_preset(aero_cfd_on_path):
         dataset_kind = "tests.integration.training_pipelines.fixtures.synthetic_datasets.StubShapeNetCarDataset"
 
     return _StubbedShapeNetCarPreset()
+
+
+@pytest.fixture
+def stubbed_shapenet_divfree_preset(aero_cfd_on_path):
+    """Yield a ``ShapeNetCarDivFreePreset`` subclass whose ``dataset_kind`` is the stub."""
+    from aero_cfd.presets import ShapeNetCarDivFreePreset
+
+    class _StubbedShapeNetCarDivFreePreset(ShapeNetCarDivFreePreset):
+        dataset_kind = "tests.integration.training_pipelines.fixtures.synthetic_datasets.StubShapeNetCarDataset"
+
+    return _StubbedShapeNetCarDivFreePreset()
 
 
 @pytest.fixture
@@ -90,6 +103,30 @@ def _build_kwargs(
     )
 
 
+def _build_divfree_kwargs(
+    *,
+    dataset_root: Path,
+    output_path: Path,
+    accelerator: str,
+) -> dict[str, Any]:
+    return dict(
+        model_kind=_DIVFREE_KIND,
+        model_params=dict(
+            hidden_dim=96,
+            geometry_depth=1,
+            physics_blocks=["perceiver", "self"],
+        ),
+        trainer_kind=_TRAINER_KIND,
+        trainer_params=dict(field_weights=_SHAPENET_FIELD_WEIGHTS, precision="float32"),
+        dataset_root=str(dataset_root),
+        output_path=str(output_path),
+        accelerator=accelerator,
+        max_epochs=1,
+        batch_size=1,
+        datasets=["train"],
+    )
+
+
 @pytest.mark.parametrize(
     "model_kind",
     [
@@ -128,6 +165,32 @@ def test_shapenet_python_api_pipeline(
     # trip over a recipe inconsistency unrelated to the pipeline.
     _patch_for_test(config, extra_excluded_properties={"surface_area"})
     train_and_assert_weights_changed(config, device=device, label=f"python-api shapenet/{model_kind}")
+
+
+def test_shapenet_python_api_pipeline_divfree(
+    stubbed_shapenet_divfree_preset,
+    tmp_path: Path,
+    accelerator: str,
+    device: str,
+) -> None:
+    """End-to-end ShapeNetCar DivFree AB-UPT run via the preset API."""
+    output_path, dataset_root = make_run_dirs(tmp_path)
+
+    config = stubbed_shapenet_divfree_preset.build_config(
+        include_evaluation=False,
+        **_build_divfree_kwargs(
+            dataset_root=dataset_root,
+            output_path=output_path,
+            accelerator=accelerator,
+        ),
+    )
+
+    assert config.datasets["train"].kind.endswith("StubShapeNetCarDataset")
+    assert isinstance(config.model, DivFreeAnchorBranchedUPTConfig)
+    assert config.trainer.precision in ("float32", "fp32")
+
+    _patch_for_test(config, extra_excluded_properties={"surface_area"})
+    train_and_assert_weights_changed(config, device=device, label="python-api shapenet/divfree")
 
 
 @pytest.mark.parametrize(

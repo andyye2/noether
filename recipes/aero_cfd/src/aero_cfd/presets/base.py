@@ -57,6 +57,13 @@ class AeroCFDPreset(DomainPreset):
             "surface_anchor_position",
             "volume_anchor_position",
         ],
+        "noether.modeling.models.divfree_aerodynamics.DivFreeAeroABUPT": [
+            "geometry_position",
+            "geometry_supernode_idx",
+            "geometry_batch_idx",
+            "surface_anchor_position",
+            "volume_anchor_position",
+        ],
         "_default": [
             "surface_position",
             "volume_position",

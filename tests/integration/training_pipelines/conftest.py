@@ -15,7 +15,7 @@ _RECIPES_DIR = _REPO_ROOT / "recipes"
 
 # Top-level package names exposed by recipes. When a recipe directory goes onto sys.path these names take over;
 # we flush them on swap so a previous recipe's cached module does not shadow the new one.
-_AERO_CFD_TOP_LEVEL = ("pipeline", "trainers", "callbacks", "model", "showcase")
+_AERO_CFD_TOP_LEVEL = ("aero_cfd", "pipeline", "trainers", "callbacks", "model", "showcase")
 _HEAT_TRANSFER_TOP_LEVEL = ("pipeline", "callbacks", "model")
 
 
@@ -50,6 +50,9 @@ def _clear_hydra() -> Iterator[None]:
 
 def _put_recipe_on_path(monkeypatch: pytest.MonkeyPatch, recipe_dir: Path, top_level_names: tuple[str, ...]) -> None:
     monkeypatch.syspath_prepend(str(recipe_dir))
+    src_dir = recipe_dir / "src"
+    if src_dir.is_dir():
+        monkeypatch.syspath_prepend(str(src_dir))
     # Drop cached top-level modules from any previously activated recipe so the next ``import pipeline`` (etc.)
     # re-resolves against the new sys.path.
     for name in top_level_names:
