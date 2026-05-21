@@ -79,3 +79,33 @@ def test_data_specs_keep_volume_velocity_vector_output() -> None:
     output_dims = preset.data_specs.domains["volume"].output_dims
 
     assert dict(output_dims.items()) == {"velocity": 3}
+
+
+def test_evaluation_callbacks_include_divergence_monitor() -> None:
+    presets = import_module("aero_cfd.presets")
+    preset = presets.ShapeNetCarDivFreePreset()
+
+    callbacks = preset.evaluation_callbacks(_DIVFREE_KIND)
+    kinds = [callback.kind for callback in callbacks]
+
+    assert kinds.count("aero_cfd.callbacks.DivFreeMetricsCallback") == 1
+
+    divfree_callback = next(
+        callback for callback in callbacks if callback.kind == "aero_cfd.callbacks.DivFreeMetricsCallback"
+    )
+    assert divfree_callback.dataset_key == "test"
+    assert divfree_callback.delta is None
+    assert divfree_callback.position_scale is None
+    assert divfree_callback.num_monitor_anchors == 256
+    assert divfree_callback.max_samples == 4
+    assert "volume_anchor_position" in divfree_callback.forward_properties
+
+
+def test_evaluation_callbacks_skip_divergence_monitor_for_baseline_model() -> None:
+    presets = import_module("aero_cfd.presets")
+    preset = presets.ShapeNetCarDivFreePreset()
+
+    callbacks = preset.evaluation_callbacks(_ABUPT_KIND)
+    kinds = [callback.kind for callback in callbacks]
+
+    assert "aero_cfd.callbacks.DivFreeMetricsCallback" not in kinds

@@ -193,6 +193,67 @@ def test_shapenet_python_api_pipeline_divfree(
     train_and_assert_weights_changed(config, device=device, label="python-api shapenet/divfree")
 
 
+def test_shapenet_python_api_divfree_metrics_callback_runs(
+    stubbed_shapenet_divfree_preset,
+    tmp_path: Path,
+    accelerator: str,
+    device: str,
+) -> None:
+    """End-to-end ShapeNetCar DivFree divergence metrics callback run."""
+    from unittest.mock import patch as mock_patch
+
+    import torch
+
+    from aero_cfd.callbacks import DivFreeMetricsCallbackConfig
+    from noether.core.writers import LogWriter
+    from noether.training.runners.hydra_runner import HydraRunner
+
+    output_path, dataset_root = make_run_dirs(tmp_path)
+
+    config = stubbed_shapenet_divfree_preset.build_config(
+        include_evaluation=False,
+        **_build_divfree_kwargs(
+            dataset_root=dataset_root,
+            output_path=output_path,
+            accelerator=accelerator,
+        ),
+    )
+    _patch_for_test(config, extra_excluded_properties={"surface_area"})
+
+    config.trainer.callbacks = [
+        DivFreeMetricsCallbackConfig(
+            dataset_key="train",
+            every_n_epochs=1,
+            batch_size=1,
+            forward_properties=stubbed_shapenet_divfree_preset.forward_properties(_DIVFREE_KIND),
+            num_monitor_anchors=4,
+            max_samples=1,
+        )
+    ]
+
+    captured: dict[str, float] = {}
+
+    def spy_add_scalar(self, key, value, *args, **kwargs):
+        if isinstance(value, torch.Tensor):
+            value = value.detach().cpu().item()
+        captured[key] = float(value)
+
+    with mock_patch.object(LogWriter, "add_scalar", spy_add_scalar):
+        trainer, model, _tracker, _mc = HydraRunner.setup_experiment(device=device, config=config)
+        trainer.train(model)
+
+    expected = {
+        "divergence/train/divergence_abs_mean",
+        "divergence/train/divergence_abs_max",
+        "divergence/train/divergence_rms",
+    }
+    missing = expected - set(captured)
+
+    assert not missing, f"DivFreeMetricsCallback did not log {missing}; got {sorted(captured)}"
+    for key in expected:
+        assert captured[key] >= 0.0
+
+
 @pytest.mark.parametrize(
     "model_kind",
     [
