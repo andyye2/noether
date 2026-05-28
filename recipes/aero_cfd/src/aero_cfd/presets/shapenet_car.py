@@ -24,6 +24,7 @@ class ShapeNetCarPreset(AeroCFDPreset):
         "num_volume_queries": 4096,
         "sample_query_points": False,
         "use_physics_features": False,
+        "volume_wake_axes": (2, 0, 1),
     }
 
     pipeline_model_overrides: dict[str, AeroPipelineParams] = {

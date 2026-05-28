@@ -19,6 +19,7 @@ from noether.data.pipeline.sample_processors import (
 
 from ..sample_processors import (
     AnchorPointSamplingSampleProcessor,
+    WakeAwareAnchorPointSamplingSampleProcessor,
 )
 
 
@@ -51,6 +52,12 @@ class AeroCFDPipelineConfig(PipelineConfig):
     """Number of volume anchor points to sample for AB-UPT."""
     num_surface_anchor_points: int | None = 0
     """Number of surface anchor points to sample for AB-UPT."""
+    volume_wake_fraction: float = 0.0
+    """Fraction of volume anchor points to allocate to the literature-defined wake box. Disabled by default."""
+    volume_wake_box_lwh: tuple[float, float, float] = (0.47, 0.43, 0.31)
+    """Wake-box dimensions normalized by vehicle length in streamwise, spanwise, and road-normal directions."""
+    volume_wake_axes: tuple[int, int, int] = (0, 1, 2)
+    """Coordinate axes in streamwise, spanwise, and road-normal order for wake-box sampling."""
     use_surface_position_as_input: bool = False
     """Whether to pass ``surface_position`` through as a model input. Required only when a downstream
     callback (e.g. the showcase eval pipeline) needs it; off by default since variable-sized point clouds
@@ -150,6 +157,9 @@ class AeroMultistagePipeline(MultiStagePipeline):
         self.num_surface_anchor_points = pipeline_config.num_surface_anchor_points
         self.num_geometry_points = pipeline_config.num_geometry_points
         self.num_geometry_supernodes = pipeline_config.num_geometry_supernodes
+        self.volume_wake_fraction = pipeline_config.volume_wake_fraction
+        self.volume_wake_box_lwh = pipeline_config.volume_wake_box_lwh
+        self.volume_wake_axes = pipeline_config.volume_wake_axes
         self.use_query_positions = False
 
         self.use_physics_features = (
@@ -456,6 +466,40 @@ class AeroMultistagePipeline(MultiStagePipeline):
             "surface_anchor_position",
             "volume_anchor_position",
         ]
+        if self.volume_wake_fraction > 0.0:
+            if self.dataset_statistics is None:
+                raise ValueError("dataset_statistics is required when volume_wake_fraction > 0.")
+            if self.dataset_statistics.raw_pos_min is None or self.dataset_statistics.raw_pos_max is None:
+                raise ValueError("raw_pos_min/raw_pos_max statistics are required when volume_wake_fraction > 0.")
+            volume_anchor_sampler = WakeAwareAnchorPointSamplingSampleProcessor(
+                items={"volume_position"}
+                | set(self.volume_targets)
+                | (self.volume_features if self.use_physics_features else set()),
+                num_points=self.num_volume_anchor_points,
+                keep_queries=self.use_query_positions,
+                to_prefix_and_postfix=_split_by_underscore,
+                to_prefix_midfix_postfix=_split_three_or_none,
+                raw_pos_min=self.dataset_statistics.raw_pos_min,
+                raw_pos_max=self.dataset_statistics.raw_pos_max,
+                wake_fraction=self.volume_wake_fraction,
+                wake_box_lwh=self.volume_wake_box_lwh,
+                wake_axes=self.volume_wake_axes,
+                reference_item="surface_position",
+                position_item="volume_position",
+                seed=None if self.seed is None else self.seed + 4,
+            )
+        else:
+            volume_anchor_sampler = AnchorPointSamplingSampleProcessor(
+                items={"volume_position"}
+                | set(self.volume_targets)
+                | (self.volume_features if self.use_physics_features else set()),
+                num_points=self.num_volume_anchor_points,
+                keep_queries=self.use_query_positions,
+                to_prefix_and_postfix=_split_by_underscore,
+                to_prefix_midfix_postfix=_split_three_or_none,
+                seed=None if self.seed is None else self.seed + 4,
+            )
+
         processors = [
             DuplicateKeysSampleProcessor(key_map={"surface_position": "geometry_position"}),
             PointSamplingSampleProcessor(
@@ -481,16 +525,7 @@ class AeroMultistagePipeline(MultiStagePipeline):
                 seed=None if self.seed is None else self.seed + 3,
             ),
             # subsample volume data
-            AnchorPointSamplingSampleProcessor(
-                items={"volume_position"}
-                | set(self.volume_targets)
-                | (self.volume_features if self.use_physics_features else set()),
-                num_points=self.num_volume_anchor_points,
-                keep_queries=self.use_query_positions,
-                to_prefix_and_postfix=_split_by_underscore,
-                to_prefix_midfix_postfix=_split_three_or_none,
-                seed=None if self.seed is None else self.seed + 4,
-            ),
+            volume_anchor_sampler,
             RenameKeysSampleProcessor(key_map={DataKeys.as_anchor(key): key for key in self.volume_targets}),
             RenameKeysSampleProcessor(key_map={DataKeys.as_anchor(key): key for key in self.surface_targets}),
         ]
