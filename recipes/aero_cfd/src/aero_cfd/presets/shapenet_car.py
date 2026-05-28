@@ -73,7 +73,7 @@ class ShapeNetCarPreset(AeroCFDPreset):
 
     @property
     def excluded_properties(self) -> set[str]:
-        return {"surface_friction", "volume_pressure", "volume_vorticity"}
+        return {"surface_area", "surface_friction", "volume_pressure", "volume_vorticity"}
 
     def target_properties(self) -> list[str]:
         return ["surface_pressure_target", "volume_velocity_target"]
