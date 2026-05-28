@@ -40,7 +40,7 @@ def build_config(args: argparse.Namespace):
         trainer_params=dict(field_weights=FIELD_WEIGHTS),
         dataset_root=args.dataset_root,
         output_path=args.output_path,
-        max_epochs=args.max_epochs,
+        max_epochs=args.max_epochs if args.max_updates is None else 1,
         batch_size=args.batch_size,
         accelerator=args.accelerator,
         seed=args.seed,
@@ -54,6 +54,10 @@ def build_config(args: argparse.Namespace):
         num_volume_anchor_points=args.num_volume_anchor_points,
         wake_fraction=args.volume_wake_fraction,
     )
+    config.trainer.precision = args.precision
+    if args.max_updates is not None:
+        config.trainer.max_epochs = None
+        config.trainer.max_updates = args.max_updates
     return config
 
 
@@ -65,7 +69,9 @@ def main() -> None:
     parser.add_argument("--num-volume-anchor-points", type=int, default=1024)
     parser.add_argument("--volume-wake-fraction", type=float, required=True)
     parser.add_argument("--max-epochs", type=int, default=500)
+    parser.add_argument("--max-updates", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--precision", default="float16", choices=["float32", "fp32", "float16", "fp16", "bfloat16", "bf16"])
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--name", default="shapenet-car-ab-upt-wake-ablation")
@@ -88,6 +94,9 @@ def main() -> None:
                 "volume_wake_axes=",
                 pipeline.volume_wake_axes,
             )
+        print("trainer max_epochs=", config.trainer.max_epochs)
+        print("trainer max_updates=", config.trainer.max_updates)
+        print("trainer precision=", config.trainer.precision)
         return
 
     HydraRunner().main(device=accelerator_to_device(args.accelerator), config=config)
