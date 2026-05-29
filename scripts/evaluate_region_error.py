@@ -108,12 +108,16 @@ def _load_dataset_config(
     hp_resolved: Path,
     split: str,
     *,
+    dataset_root: Path | None,
     eval_num_volume_anchor_points: int | None,
 ) -> StandardDatasetConfig:
     with hp_resolved.open() as handle:
         hp = yaml.safe_load(handle)
-    dataset_dict = hp["datasets"][split]
+    dataset_dict = dict(hp["datasets"][split])
+    dataset_dict["pipeline"] = dict(dataset_dict["pipeline"])
     dataset_dict["pipeline"]["kind"] = "aero_cfd.pipeline.AeroMultistagePipeline"
+    if dataset_root is not None:
+        dataset_dict["root"] = dataset_root.as_posix()
     if eval_num_volume_anchor_points is not None:
         dataset_dict["pipeline"]["num_volume_anchor_points"] = eval_num_volume_anchor_points
     return StandardDatasetConfig(**dataset_dict)
@@ -211,13 +215,21 @@ def _fmt(value: float | int | str) -> str:
     return f"{value:.6g}"
 
 
-def _write_markdown(path: Path, rows: list[dict[str, float | int | str]], *, checkpoint: Path, split: str) -> None:
+def _write_markdown(
+    path: Path,
+    rows: list[dict[str, float | int | str]],
+    *,
+    checkpoint: Path,
+    split: str,
+    dataset_root: Path | None,
+) -> None:
     columns = ["region", "point_count", "point_fraction", "velocity_mse", "velocity_mae", "relative_l2", "mse_over_global"]
     lines = [
-        "# Baseline Region Error",
+        "# Region Error",
         "",
         f"- checkpoint: `{checkpoint}`",
         f"- split: `{split}`",
+        f"- dataset root override: `{dataset_root}`" if dataset_root is not None else "- dataset root override: none",
         "",
         "|" + "|".join(columns) + "|",
         "|" + "|".join("---" for _ in columns) + "|",
@@ -233,6 +245,7 @@ def evaluate(args: argparse.Namespace) -> list[dict[str, float | int | str]]:
     dataset_config = _load_dataset_config(
         args.hp_resolved,
         args.split,
+        dataset_root=args.dataset_root,
         eval_num_volume_anchor_points=args.eval_num_volume_anchor_points,
     )
     dataset = DatasetFactory().create(dataset_config)
@@ -294,7 +307,9 @@ def main() -> None:
     parser.add_argument("--checkpoint", type=Path, default=Path(DEFAULT_CHECKPOINT))
     parser.add_argument("--hp-resolved", type=Path, default=Path(DEFAULT_HP_RESOLVED))
     parser.add_argument("--split", default="test")
+    parser.add_argument("--dataset-root", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--output-prefix", default="baseline_region_error")
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
     parser.add_argument("--eval-num-volume-anchor-points", type=int, default=None)
@@ -316,15 +331,18 @@ def main() -> None:
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     rows = evaluate(args)
-    _write_csv(args.output_dir / "baseline_region_error.csv", rows)
+    csv_path = args.output_dir / f"{args.output_prefix}.csv"
+    markdown_path = args.output_dir / f"{args.output_prefix}.md"
+    _write_csv(csv_path, rows)
     _write_markdown(
-        args.output_dir / "baseline_region_error.md",
+        markdown_path,
         rows,
         checkpoint=args.checkpoint,
         split=args.split,
+        dataset_root=args.dataset_root,
     )
-    print(f"Wrote {args.output_dir / 'baseline_region_error.md'}")
-    print(f"Wrote {args.output_dir / 'baseline_region_error.csv'}")
+    print(f"Wrote {markdown_path}")
+    print(f"Wrote {csv_path}")
 
 
 if __name__ == "__main__":
