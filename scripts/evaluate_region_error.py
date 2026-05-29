@@ -109,7 +109,6 @@ def _load_dataset_config(
     split: str,
     *,
     eval_num_volume_anchor_points: int | None,
-    eval_volume_wake_fraction: float | None,
 ) -> StandardDatasetConfig:
     with hp_resolved.open() as handle:
         hp = yaml.safe_load(handle)
@@ -117,8 +116,6 @@ def _load_dataset_config(
     dataset_dict["pipeline"]["kind"] = "aero_cfd.pipeline.AeroMultistagePipeline"
     if eval_num_volume_anchor_points is not None:
         dataset_dict["pipeline"]["num_volume_anchor_points"] = eval_num_volume_anchor_points
-    if eval_volume_wake_fraction is not None:
-        dataset_dict["pipeline"]["volume_wake_fraction"] = eval_volume_wake_fraction
     return StandardDatasetConfig(**dataset_dict)
 
 
@@ -237,7 +234,6 @@ def evaluate(args: argparse.Namespace) -> list[dict[str, float | int | str]]:
         args.hp_resolved,
         args.split,
         eval_num_volume_anchor_points=args.eval_num_volume_anchor_points,
-        eval_volume_wake_fraction=args.eval_volume_wake_fraction,
     )
     dataset = DatasetFactory().create(dataset_config)
     pipeline = Factory().create(dataset_config.pipeline)
@@ -302,7 +298,6 @@ def main() -> None:
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
     parser.add_argument("--eval-num-volume-anchor-points", type=int, default=None)
-    parser.add_argument("--eval-volume-wake-fraction", type=float, default=None)
     parser.add_argument("--wake-axes", type=_parse_axes, default=(2, 0, 1))
     parser.add_argument("--wake-box-lwh", type=_parse_floats, default=(0.47, 0.43, 0.31))
     parser.add_argument("--near-wall-fractions", type=_parse_floats, default=(0.005, 0.01, 0.02))

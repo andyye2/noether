@@ -26,9 +26,6 @@ class AeroPipelineParams(TypedDict, total=False):
     num_geometry_points: int
     num_volume_anchor_points: int
     num_surface_anchor_points: int
-    volume_wake_fraction: float
-    volume_wake_box_lwh: tuple[float, float, float]
-    volume_wake_axes: tuple[int, int, int]
     seed: int
 
 
