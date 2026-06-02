@@ -1,0 +1,90 @@
+name: Create and Publish Release
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  release:
+    name: CalVer Release
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute CalVer version
+        id: calver
+        run: |
+          COMMIT_MSG=$(git log -1 --format=%B)
+          if echo "$COMMIT_MSG" | grep -qF "[skip release]"; then
+            echo "Skipping release — [skip release] found in commit message"
+            exit 0
+          fi
+          YEAR=$(date +%Y)
+          MONTH=$(date +%-m)
+          PATCH=$(git tag --list "v${YEAR}.${MONTH}.*" \
+            | grep -oP "(?<=v${YEAR}\.${MONTH}\.)\d+" \
+            | sort -n | tail -1)
+          NEXT=$(( ${PATCH:-"-1"} + 1 ))
+          VERSION="v${YEAR}.${MONTH}.${NEXT}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push git tag
+        if: steps.calver.outputs.version
+        run: |
+          git tag "${{ steps.calver.outputs.version }}"
+          git push origin "${{ steps.calver.outputs.version }}"
+
+      - name: Setup uv
+        if: steps.calver.outputs.version
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Bump version in pyproject.toml and sync lock file
+        if: steps.calver.outputs.version
+        run: |
+          uv version ${{ steps.calver.outputs.version }}
+          uv sync
+
+      - name: Build package
+        if: steps.calver.outputs.version
+        run: uv build
+
+      - name: Create GitHub Release and attach wheel
+        if: steps.calver.outputs.version
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.calver.outputs.version }}
+          generate_release_notes: true
+          files: dist/*.whl
+
+      - name: Publish to PyPI
+        if: steps.calver.outputs.version
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+
+      - name: Create Pull Request with version bump
+        if: steps.calver.outputs.version
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore(release): ${{ steps.calver.outputs.version }} [skip ci]"
+          title: "chore(release): Version ${{ steps.calver.outputs.version }}"
+          body: "Update version to ${{ steps.calver.outputs.version }} and sync lockfile."
+          branch: "chore/release-${{ steps.calver.outputs.version }}"
+          base: "${{ github.ref_name }}"
+          add-paths: |
+            pyproject.toml
+            uv.lock

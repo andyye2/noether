@@ -1,0 +1,17 @@
+# @package _global_
+
+collator_kind: dummy_project.pipelines.BaseMultiStagePipeline
+dataset_kind: dummy_project.datasets.BaseDataset
+config_schema_kind : dummy_project.schemas.config_schema.BoilerplateConfigSchema
+
+defaults:
+  - model: base_model
+  - datasets: base_dataset
+  - tracker: null 
+  - callbacks: base_callback
+  - trainer: base_trainer
+  - optim: adamw 
+  - _self_
+
+accelerator: cpu
+output_path: tests/test_files/output

@@ -1,0 +1,8 @@
+
+kind: dummy_project.trainer.TestTrainer 
+precision: float32
+max_epochs: 1
+effective_batch_size: 10
+log_every_n_epochs: 1
+callbacks: ${callbacks}
+input_dim: 2

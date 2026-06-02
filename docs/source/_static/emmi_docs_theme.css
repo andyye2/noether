@@ -1,0 +1,111 @@
+html {
+  /* Tell the browser and all components we are light-only */
+  color-scheme: light !important;
+}
+
+/* Make "Note" titles use brand; bodies stay readable */
+.admonition.note > .admonition-title { background: var(--color-brand-primary); color: #fff; }
+.admonition.note { border-color: var(--color-brand-primary); }
+.admonition.note > .admonition-title::before {
+  background-color: var(--color-link--visited) !important;
+}
+
+/* Keep heading links inheriting the heading color */
+article h1, article h2, article h3 { color: var(--color-brand-primary); }
+article h1 > a, article h2 > a, article h3 > a,
+article h1 > a.headerlink, article h2 > a.headerlink, article h3 > a.headerlink { color: inherit; text-decoration: none; }
+
+/* We move these variables from :root to body to ensure they override
+   sphinx-design's defaults which are also applied to body.
+*/
+body {
+    /* FORCE TRANSPARENCY: Overwrite the specific variables causing the gray flash */
+    --color-card-background: transparent !important;
+    --sd-color-card-background: transparent !important;
+
+    /* sphinx-design variables */
+    --sd-color-primary: #661371;
+    --sd-color-brand-primary: #661371;
+    --sd-color-secondary: #c816df;
+    --sd-color-brand-secondary: #c816df;
+    --sd-color-success: #28a745;
+    --sd-color-info: #17a2b8;
+    --sd-color-warning: #f0b37e;
+    --sd-color-danger: #dc3545;
+    --sd-color-light: #f8f9fa;
+    --sd-color-muted: #6c757d;
+    --sd-color-dark: #212529;
+    --sd-color-primary-highlight: #ce40e1;
+    --sd-color-secondary-highlight: #5c636a;
+    --sd-color-success-highlight: #228e3b;
+    --sd-color-info-highlight: #148a9c;
+    --sd-color-warning-highlight: #cc986b;
+    --sd-color-danger-highlight: #bb2d3b;
+    --sd-color-light-highlight: #d3d4d5;
+    --sd-color-muted-highlight: #5c636a;
+    --sd-color-dark-highlight: #1c1f23;
+    --sd-color-primary-text: #fff;
+    --sd-color-secondary-text: #fff;
+    --sd-color-success-text: #fff;
+    --sd-color-info-text: #fff;
+    --sd-color-warning-text: #212529;
+    --sd-color-danger-text: #fff;
+    --sd-color-light-text: #212529;
+    --sd-color-muted-text: #fff;
+    --sd-color-dark-text: #fff;
+    --sd-color-shadow: rgba(0, 0, 0, 0.15);
+    --sd-color-card-border: rgba(0, 0, 0, 0.125);
+    --sd-color-card-border-hover: hsl(283, 99%, 66%);
+
+    /* Ensure the card background variable is transparent here as well */
+    --sd-color-card-background: transparent;
+
+    --sd-color-card-text: inherit;
+    --sd-color-card-header: transparent;
+    --sd-color-card-footer: transparent;
+    --sd-color-tabs-label-active: hsl(283, 99%, 66%);
+    --sd-color-tabs-label-hover: hsl(283, 99%, 66%);
+    --sd-color-tabs-label-inactive: hsl(0, 0%, 66%);
+    --sd-color-tabs-label-selected: hsl(283, 99%, 66%);
+    --sd-color-tabs-underline-active: hsl(283, 99%, 66%);
+    --sd-color-tabs-underline-hover: rgba(178, 206, 245, 0.62);
+    --sd-color-tabs-underline-inactive: transparent;
+    --sd-color-tabs-overline: rgb(222, 222, 222);
+    --sd-color-tabs-underline: rgb(222, 222, 222);
+    --sd-fontsize-tabs-label: 1rem;
+    --sd-fontsize-dropdown-title: 1rem;
+    --sd-fontweight-dropdown-title: 700;
+}
+
+/* This media query runs BEFORE our custom JS. It tells the browser:
+   "Even if the user is in Dark Mode, force these specific elements to be transparent/light."
+   This stops the split-second gray flash on reload.
+*/
+@media (prefers-color-scheme: dark) {
+    body {
+        --color-card-background: transparent !important;
+        --sd-color-card-background: transparent !important;
+        --color-background-hover: rgba(205, 82, 254, 0.30) !important;
+    }
+}
+
+.theme-toggle-container {
+    display: none;
+}
+/* --- SIDEBAR SPACING --- */
+
+.sidebar-tree > ul {
+    margin-bottom: 1rem !important;
+}
+
+/* Add spacing before the navigation tree if it follows another tree (for sections without captions) */
+.sidebar-tree + .sidebar-tree {
+    margin-top: 2rem;
+}
+
+/* --- RECIPE ZOO: keep non-featured card thumbnails at a uniform height --- */
+.recipe-card-thumb {
+    height: 200px;
+    width: 100%;
+    object-fit: cover;
+}

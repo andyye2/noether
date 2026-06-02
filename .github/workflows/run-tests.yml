@@ -1,0 +1,64 @@
+name: tests
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [ "**" ]        # PRs into any branch (incl. main)
+  push:
+    branches: [ main ]        # merge commit on protected main
+  workflow_dispatch: {}       # manual runs for any branch
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup uv (with cache)
+        id: setup-uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: |
+          uv sync --frozen
+
+      - name: Show env (brief)
+        run: |
+          python -V
+          uv pip list | head -n 200
+
+      - name: Run tests
+        run: |
+          uv run --no-sync pytest \
+            --maxfail=1 --disable-warnings \
+            --cov=src --cov-report=term-missing:skip-covered \
+            --cov-report=xml:coverage.xml \
+            --junitxml=pytest.xml
+
+      - name: Save PR info
+        if: always() && github.event_name == 'pull_request'
+        run: |
+          echo ${{ github.event.number }} > pr_number.txt
+
+      - name: Upload coverage artifacts
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-artifacts
+          path: |
+            coverage.xml
+            pytest.xml
+            pr_number.txt

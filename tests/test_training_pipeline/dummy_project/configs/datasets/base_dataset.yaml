@@ -1,0 +1,6 @@
+train:
+  kind: ${dataset_kind}
+  num_samples: 100 
+test:
+  kind: ${dataset_kind}
+  num_samples: 10

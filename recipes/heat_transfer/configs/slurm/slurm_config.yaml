@@ -1,0 +1,9 @@
+cpus_per_task: 28
+folder: /home/%u/logs/${name}
+gpus_per_node: 1
+mem_gb: 64
+name: ${name}
+nodes: 1
+slurm_partition: compute
+slurm_additional_parameters:
+  nice: 0

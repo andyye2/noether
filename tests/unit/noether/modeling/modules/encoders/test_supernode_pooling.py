@@ -1,0 +1,300 @@
+#  Copyright © 2025 Emmi AI GmbH. All rights reserved.
+
+import pytest
+import torch
+
+from noether.core.schemas.modules.encoders import SupernodePoolingConfig
+from noether.modeling.modules.encoders import SupernodePooling
+from tests.unit.noether.modeling.modules.encoders.expected_output import SUPERNODE_REPRESENTATIONS
+
+
+@pytest.fixture
+def setup_module():
+    torch.manual_seed(42)
+    config = SupernodePoolingConfig(
+        radius=0.5,
+        hidden_dim=16,
+        input_dim=3,
+        max_degree=32,
+        spool_pos_mode="abspos",
+        init_weights="torch",
+        readd_supernode_pos=True,
+        aggregation="mean",
+    )
+    return SupernodePooling(config=config)
+
+
+def test_nofeatures_forward_abspos(setup_module):
+    torch.manual_seed(42)
+    module = setup_module
+
+    input_pos = torch.rand(10, 3)
+    supernode_idxs = torch.tensor([0, 1, 5, 6])
+    batch_idx = torch.tensor([0, 0, 0, 0, 0, 1, 1, 1, 1, 1])
+
+    output = module(input_pos, supernode_idxs, batch_idx)
+
+    assert output.shape[0] == batch_idx.max() + 1  # batch size
+    assert output.shape[1] == len(supernode_idxs) // (batch_idx.max() + 1)  # supernodes per batch
+    assert output.shape[2] == module.output_dim  # hidden dimension
+    assert torch.allclose(output, SUPERNODE_REPRESENTATIONS, 1e-2)
+
+    output.sum().backward()
+    assert module.proj.project.weight.grad is not None, "Gradients should not be None"
+    assert module.proj.project.bias.grad is not None, "Gradients should not be None"
+    assert module.message[0].project.weight.grad is not None, "Gradients should not be None"
+
+
+def test_nofeatures_forward_absrelpos():
+    config = SupernodePoolingConfig(
+        radius=0.5,
+        hidden_dim=16,
+        input_dim=3,
+        max_degree=32,
+        spool_pos_mode="absrelpos",
+        init_weights="torch",
+        readd_supernode_pos=True,
+        aggregation="mean",
+    )
+    module = SupernodePooling(config=config)
+    input_pos = torch.rand(10, 3)
+    supernode_idxs = torch.tensor([0, 1, 5, 6])
+    batch_idx = torch.tensor([0, 0, 0, 0, 0, 1, 1, 1, 1, 1])
+
+    output = module(input_pos, supernode_idxs, batch_idx)
+
+    assert output.shape[0] == batch_idx.max() + 1  # batch size
+    assert output.shape[1] == len(supernode_idxs) // (batch_idx.max() + 1)  # supernodes per batch
+    assert output.shape[2] == module.output_dim  # hidden dimension
+
+
+def test_nofeatures_forward_invalid_mode():
+    with pytest.raises(Exception):
+        config = SupernodePoolingConfig(
+            radius=0.5,
+            hidden_dim=16,
+            input_dim=3,
+            max_degree=32,
+            spool_pos_mode="invalid_mode",
+            init_weights="torch",
+            readd_supernode_pos=True,
+            aggregation="mean",
+        )
+        SupernodePooling(config=config)
+
+
+def test_nofeatures_forward_no_batch_idx(setup_module):
+    module = setup_module
+    input_pos = torch.rand(10, 3)
+    supernode_idxs = torch.tensor([0, 1, 5, 6])
+    batch_idx = None
+
+    output = module(input_pos, supernode_idxs, batch_idx)
+
+    assert output.shape[0] == 1  # batch dim
+    assert output.shape[1] == len(supernode_idxs)  # supernodes
+    assert output.shape[2] == 16  # supernodes
+
+
+def test_nofeatures_compute_src_and_dst_indices(setup_module):
+    input_pos = torch.tensor(
+        [
+            [0, 0, 0],
+            [1, 1, 1],
+            [2, 2, 2],
+            [3, 3, 3],
+            [4, 4, 4],
+            [5, 5, 5],
+            [6, 6, 6],
+            [7, 7, 7],
+            [8, 8, 8],
+            [9, 9, 9],
+        ],
+        dtype=torch.float32,
+    )
+
+    supernode_idxs = torch.tensor([1, 3, 5, 7])
+
+    config = SupernodePoolingConfig(
+        radius=2,
+        hidden_dim=16,
+        input_dim=3,
+        max_degree=1,
+        spool_pos_mode="abspos",
+        init_weights="torch",
+        readd_supernode_pos=True,
+        aggregation="mean",
+    )
+    supernode_pooling = SupernodePooling(config=config)
+
+    src_idx, dst_idx, _ = supernode_pooling.compute_src_and_dst_indices(
+        input_pos=input_pos, supernode_idx=supernode_idxs, batch_idx=None
+    )
+    assert torch.all(supernode_idxs == dst_idx)
+    assert len(src_idx) == len(supernode_idxs)
+    assert torch.all(src_idx == supernode_idxs - 1)
+
+    config = SupernodePoolingConfig(
+        radius=2,
+        hidden_dim=16,
+        input_dim=3,
+        max_degree=2,
+        spool_pos_mode="abspos",
+        init_weights="torch",
+        readd_supernode_pos=True,
+        aggregation="mean",
+    )
+    supernode_pooling = SupernodePooling(config=config)
+
+    src_idx, dst_idx, _ = supernode_pooling.compute_src_and_dst_indices(
+        input_pos=input_pos, supernode_idx=supernode_idxs, batch_idx=None
+    )
+
+    assert torch.all(dst_idx == torch.tensor([1, 1, 3, 3, 5, 5, 7, 7]))
+    assert torch.all(src_idx == torch.tensor([0, 1, 2, 3, 4, 5, 6, 7]))
+
+
+def test_features_forward_abspos(setup_module):
+    torch.manual_seed(42)
+    config = SupernodePoolingConfig(
+        radius=0.5,
+        hidden_dim=16,
+        input_dim=3,
+        max_degree=32,
+        spool_pos_mode="abspos",
+        init_weights="torch",
+        readd_supernode_pos=True,
+        aggregation="mean",
+        input_features_dim=2,
+    )
+    module = SupernodePooling(config=config)
+
+    input_pos = torch.rand(10, 3)
+    input_feat = torch.rand(10, 2)
+    supernode_idxs = torch.tensor([0, 1, 5, 6])
+    batch_idx = torch.tensor([0, 0, 0, 0, 0, 1, 1, 1, 1, 1])
+
+    output = module(input_pos, supernode_idxs, batch_idx, input_feat)
+
+    assert output.shape[0] == batch_idx.max() + 1  # batch size
+    assert output.shape[1] == len(supernode_idxs) // (batch_idx.max() + 1)  # supernodes per batch
+    assert output.shape[2] == module.output_dim  # hidden dimension
+    # Note: Exact value check removed after merging SupernodePooling implementations
+
+    output.sum().backward()
+    assert module.proj.project.weight.grad is not None, "Gradients should not be None"
+    assert module.proj.project.bias.grad is not None, "Gradients should not be None"
+    assert module.message[0].project.weight.grad is not None, "Gradients should not be None"
+    assert module.feature_projection.project.weight.grad is not None, "Gradients should not be None"
+    assert module.feature_projection.project.bias.grad is not None, "Gradients should not be None"
+    assert module.feature_down_projection.project.weight.grad is not None, "Gradients should not be None"
+    assert module.feature_down_projection.project.bias.grad is not None, "Gradients should not be None"
+
+
+def test_features_forward_relpos(setup_module):
+    torch.manual_seed(42)
+    config = SupernodePoolingConfig(
+        radius=0.5,
+        hidden_dim=16,
+        input_dim=3,
+        max_degree=32,
+        spool_pos_mode="relpos",
+        init_weights="torch",
+        readd_supernode_pos=True,
+        aggregation="mean",
+        input_features_dim=2,
+    )
+    module = SupernodePooling(config=config)
+
+    input_pos = torch.rand(10, 3)
+    input_feat = torch.rand(10, 2)
+    supernode_idxs = torch.tensor([0, 1, 5, 6])
+    batch_idx = torch.tensor([0, 0, 0, 0, 0, 1, 1, 1, 1, 1])
+
+    output = module(input_pos, supernode_idxs, batch_idx, input_feat)
+
+    assert output.shape[0] == batch_idx.max() + 1  # batch size
+    assert output.shape[1] == len(supernode_idxs) // (batch_idx.max() + 1)  # supernodes per batch
+    assert output.shape[2] == module.output_dim  # hidden dimension
+
+    output.sum().backward()
+    assert module.proj.project.weight.grad is not None, "Gradients should not be None"
+    assert module.proj.project.bias.grad is not None, "Gradients should not be None"
+    assert module.feature_projection.project.weight.grad is not None, "Gradients should not be None"
+    assert module.feature_projection.project.bias.grad is not None, "Gradients should not be None"
+    assert module.feature_down_projection.project.weight.grad is not None, "Gradients should not be None"
+    assert module.feature_down_projection.project.bias.grad is not None, "Gradients should not be None"
+    assert module.message[0].project.weight.grad is not None, "Gradients should not be None"
+
+
+def test_features_wrong_shape():
+    with pytest.raises(AssertionError):
+        torch.manual_seed(42)
+        config = SupernodePoolingConfig(
+            radius=0.5,
+            hidden_dim=16,
+            input_dim=3,
+            max_degree=32,
+            spool_pos_mode="relpos",
+            init_weights="torch",
+            readd_supernode_pos=True,
+            aggregation="mean",
+            num_input_features=2,
+        )
+        module = SupernodePooling(config=config)
+
+        input_pos = torch.rand(10, 3)
+        input_feat = torch.rand(10, 3)
+        supernode_idxs = torch.tensor([0, 1, 5, 6])
+        batch_idx = torch.tensor([0, 0, 0, 0, 0, 1, 1, 1, 1, 1])
+
+        output = module(input_pos, supernode_idxs, batch_idx, input_feat)
+
+
+def test_supernode_pooling_six_points_two_clusters():
+    """Test with 6 points that cluster to 2 supernodes and checks the mean output."""
+    # 6 points: 3 near (0,0,0) and 3 near (1,1,1)
+    input_pos = torch.tensor(
+        [[0.0, 0.0, 0.0], [1.1, 1.0, 1.0], [0.1, 0.0, 0.0], [0.2, 0.0, 0.0], [1.0, 1.0, 1.0], [1.2, 1.0, 1.0]],
+        dtype=torch.float32,
+    )
+    # shuffle_idx = torch.randperm(input_pos.shape[0])
+    # input_pos = input_pos[shuffle_idx]
+
+    # 2 supernodes at indices 0 and 1
+    supernode_idx = torch.tensor([0, 1], dtype=torch.long)
+
+    # Configuration for mean aggregation and identity messages
+    config = SupernodePoolingConfig(
+        hidden_dim=16,
+        input_dim=3,
+        radius=0.5,
+        spool_pos_mode="abspos",
+        aggregation="mean",
+        message_mode="identity",
+        readd_supernode_pos=False,
+    )
+    module = SupernodePooling(config=config)
+
+    # Forward pass
+    output = module(input_pos, supernode_idx)
+
+    # Reference calculation
+    pos_embeddings = module.pos_embed(input_pos)
+
+    # S0 cluster: indices 0, 2, 3 (within radius 0.5 of P0)
+    # Average of pos_embeddings of points in cluster
+    s0_cluster_mean = pos_embeddings[[0, 2, 3]].mean(dim=0)
+    # Message for S0 is concat([src_pos_embed, dst_pos_embed]), where dst is P0
+    expected_s0 = torch.cat([s0_cluster_mean, pos_embeddings[0]], dim=0)
+
+    # S1 cluster: indices 1, 4, 5 (within radius 0.5 of P1)
+    s1_cluster_mean = pos_embeddings[[1, 4, 5]].mean(dim=0)
+    # Message for S1 is concat([src_pos_embed, dst_pos_embed]), where dst is P1
+    expected_s1 = torch.cat([s1_cluster_mean, pos_embeddings[1]], dim=0)
+
+    # Expected output shape: (1, 2, 32)
+    expected_output = torch.stack([expected_s0, expected_s1], dim=0).unsqueeze(0)
+
+    assert torch.allclose(output, expected_output, atol=1e-6)
+    assert output.shape == (1, 2, 32)

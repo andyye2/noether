@@ -1,0 +1,36 @@
+name: pre-commit
+
+on:
+  pull_request:
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+ # Install uv + enable cache keyed by pyproject/uv.lock across repo
+      - name: Setup uv (with cache)
+        id: setup-uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: |
+          if [ -f uv.lock ]; then
+            uv sync --all-extras --frozen      # respect lock if present
+          else
+            uv sync --all-extras               # otherwise resolve fresh
+          fi
+      
+      - name: pre-commit (PR diff only)
+        uses: pre-commit/action@v3.0.1
+        with:
+          extra_args: >-
+            --from-ref ${{ github.event.pull_request.base.sha }}
+            --to-ref ${{ github.event.pull_request.head.sha }}

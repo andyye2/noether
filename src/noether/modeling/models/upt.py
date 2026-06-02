@@ -1,0 +1,120 @@
+#  Copyright © 2025 Emmi AI GmbH. All rights reserved.
+
+import torch
+from torch import nn
+
+from noether.core.schemas.models import UPTConfig
+from noether.modeling.modules import DeepPerceiverDecoder, SupernodePooling, TransformerBlock
+from noether.modeling.modules.layers import ContinuousSincosEmbed, LinearProjection, RopeFrequency
+
+
+class UPT(nn.Module):
+    """Implementation of the UPT (Universal Physics Transformer) model."""
+
+    def __init__(
+        self,
+        config: UPTConfig,
+    ):
+        """
+        Args:
+            config: Configuration for the UPT model. See :class:`~noether.core.schemas.models.UPTConfig` for details.
+        """
+
+        super().__init__()
+
+        self.use_rope = config.use_rope
+        self.encoder = SupernodePooling(config=config.supernode_pooling_config)
+        self.pos_embed = ContinuousSincosEmbed(config=config.pos_embedding_config)  # type: ignore[arg-type]
+        if self.use_rope:
+            self.rope = RopeFrequency(config=config.rope_frequency_config)  # type: ignore[arg-type]
+
+        self.approximator_blocks = nn.ModuleList(
+            [
+                TransformerBlock(
+                    config=config.approximator_config,
+                )
+                for _ in range(config.approximator_depth)
+            ],
+        )
+
+        self.decoder = DeepPerceiverDecoder(config=config.decoder_config)  # type: ignore[arg-type]
+
+        self.norm = nn.LayerNorm(
+            config.decoder_config.perceiver_block_config.hidden_dim,
+            eps=config.decoder_config.perceiver_block_config.eps,
+        )
+
+        self.prediction_layer = LinearProjection(config=config.linear_output_projection_config)  # type: ignore[arg-type]
+
+    def compute_rope_args(
+        self,
+        geometry_batch_idx: torch.Tensor,
+        geometry_position: torch.Tensor,
+        geometry_supernode_idx: torch.Tensor,
+        query_position: torch.Tensor,
+    ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+        """Compute the RoPE frequency arguments for the geometry and query positions.
+        If RoPE is not used, return empty dicts.
+        """
+        if not self.use_rope:
+            return {}, {}
+
+        batch_size = geometry_batch_idx.unique().shape[0]
+        supernode_freqs = self.rope(geometry_position[geometry_supernode_idx])
+        channels = supernode_freqs.shape[-1]
+        if supernode_freqs.ndim == 2:
+            supernode_freqs = supernode_freqs.unsqueeze(0)  # add batch dimension
+        supernode_freqs = supernode_freqs.reshape(batch_size, -1, channels)
+        encoder_attn_kwargs = dict(freqs=supernode_freqs)
+        decoder_attn_kwargs = dict(
+            q_freqs=self.rope(query_position),
+            k_freqs=supernode_freqs,
+        )
+
+        return encoder_attn_kwargs, decoder_attn_kwargs
+
+    def forward(
+        self,
+        geometry_batch_idx: torch.Tensor,
+        geometry_supernode_idx: torch.Tensor,
+        geometry_position: torch.Tensor,
+        query_position: torch.Tensor,
+    ) -> torch.Tensor:
+        """Forward pass of the UPT model.
+
+        Args:
+            geometry_batch_idx: Batch indices for the geometry positions.
+            geometry_supernode_idx: Supernode indices for the geometry positions.
+            geometry_position: Input coordinates of the geometry mesh points.
+            query_position: Input coordinates of the query points.
+
+        Returns:
+            torch.Tensor: Output tensor containing the predictions at query positions.
+        """
+
+        encoder_attn_kwargs, decoder_attn_kwargs = self.compute_rope_args(
+            geometry_batch_idx, geometry_position, geometry_supernode_idx, query_position
+        )
+
+        # supernode pooling encoder
+        x = self.encoder(
+            input_pos=geometry_position,
+            supernode_idx=geometry_supernode_idx,
+            batch_idx=geometry_batch_idx,
+        )
+        # approximator blocks
+        for block in self.approximator_blocks:
+            x, _ = block(x, attn_kwargs=encoder_attn_kwargs)
+
+        queries = self.pos_embed(query_position)
+
+        # perceiver decoder
+        x = self.decoder(
+            kv=x,
+            queries=queries,
+            attn_kwargs=decoder_attn_kwargs,
+            condition=None,
+        )
+
+        x = self.norm(x)
+        return self.prediction_layer(x)  # type: ignore[no-any-return]
