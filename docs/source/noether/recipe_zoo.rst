@@ -36,6 +36,7 @@ All recipe source code lives under the `recipes/ <https://github.com/Emmi-AI/noe
 
       - :doc:`Full walkthrough </tutorials/walkthrough/index>`
       - :doc:`Python scripts reference <aero_cfd_python>`
+      - :doc:`Adaptive volume anchor sampling <aero_cfd_adaptive_sampling>`
       - `Source code <https://github.com/Emmi-AI/noether/tree/main/recipes/aero_cfd>`_
 
    .. grid-item-card:: :ph:`thermometer-hot` Fluid Heat Transfer
@@ -55,4 +56,5 @@ All recipe source code lives under the `recipes/ <https://github.com/Emmi-AI/noe
    :hidden:
 
    aero_cfd_python
+   aero_cfd_adaptive_sampling
    heat_transfer

@@ -26,6 +26,13 @@ class AeroPipelineParams(TypedDict, total=False):
     num_geometry_points: int
     num_volume_anchor_points: int
     num_surface_anchor_points: int
+    use_volume_score_sampling: bool
+    volume_score_dir: str | None
+    volume_score_key: str
+    volume_score_uniform_fraction: float
+    volume_score_gamma: float
+    volume_score_eps: float
+    emit_volume_score_candidates: bool
     seed: int
 
 

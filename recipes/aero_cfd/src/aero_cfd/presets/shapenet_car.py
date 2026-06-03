@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from aero_cfd.callbacks import AeroMetricsCallbackConfig
+from aero_cfd.callbacks import AeroMetricsCallbackConfig, VolumeResidualScoreRefreshCallbackConfig
 from noether.core.schemas.dataset import DomainDataSpec, ModelDataSpecs, RepeatWrapperConfig
 from noether.core.schemas.normalizers import FieldNormalizerConfig
 from noether.core.schemas.schema import ConfigSchema
@@ -98,9 +98,74 @@ class ShapeNetCarPreset(AeroCFDPreset):
     ) -> ConfigSchema:
         """Build config with optional domain-specific evaluation callbacks and test_repeat dataset."""
         batch_size = kwargs.get("batch_size", 1)
+        seed = kwargs.get("seed", 42)
+
+        use_volume_score_sampling = kwargs.pop("use_volume_score_sampling", False)
+        volume_score_dir = kwargs.pop("volume_score_dir", None)
+        volume_score_key = kwargs.pop("volume_score_key", "volume_sampling_score")
+        volume_score_uniform_fraction = kwargs.pop("volume_score_uniform_fraction", 0.3)
+        volume_score_gamma = kwargs.pop("volume_score_gamma", 1.0)
+        volume_score_eps = kwargs.pop("volume_score_eps", 1e-8)
+        volume_score_refresh_every_n_epochs = kwargs.pop("volume_score_refresh_every_n_epochs", None)
+        volume_score_query_chunk_size = kwargs.pop("volume_score_query_chunk_size", 10000)
 
         extra_callbacks = kwargs.pop("extra_callbacks", None) or []
         extra_datasets = kwargs.pop("extra_datasets", None) or {}
+
+        if (use_volume_score_sampling or volume_score_refresh_every_n_epochs is not None) and volume_score_dir is None:
+            raise ValueError("volume_score_dir is required for volume score sampling or score refresh.")
+
+        volume_score_pipeline_overrides = {
+            "volume_score_dir": volume_score_dir,
+            "volume_score_key": volume_score_key,
+            "volume_score_uniform_fraction": volume_score_uniform_fraction,
+            "volume_score_gamma": volume_score_gamma,
+            "volume_score_eps": volume_score_eps,
+        }
+
+        if use_volume_score_sampling:
+            train_dataset = self.build_dataset(
+                split="train",
+                root=dataset_root,
+                model_kind=model_kind,
+                use_volume_score_sampling=True,
+                **volume_score_pipeline_overrides,
+            )
+            self._validate_volume_score_pipeline(train_dataset.pipeline)
+            extra_datasets["train"] = train_dataset
+
+            trainer_kind = kwargs.get("trainer_kind")
+            if trainer_kind == "noether.training.trainers.WeightedLossTrainer":
+                kwargs["trainer_kind"] = "aero_cfd.trainers.SamplingWeightedLossTrainer"
+            elif trainer_kind != "aero_cfd.trainers.SamplingWeightedLossTrainer":
+                raise ValueError("Volume score sampling requires SamplingWeightedLossTrainer.")
+
+            trainer_params = dict(kwargs.get("trainer_params") or {})
+            sample_weight_keys = dict(trainer_params.get("sample_weight_keys") or {})
+            sample_weight_keys.setdefault("volume_velocity", "volume_anchor_sampling_weight")
+            trainer_params["sample_weight_keys"] = sample_weight_keys
+            kwargs["trainer_params"] = trainer_params
+
+        if volume_score_refresh_every_n_epochs is not None:
+            score_refresh_dataset = self.build_dataset(
+                split="train",
+                root=dataset_root,
+                model_kind=model_kind,
+                use_volume_score_sampling=False,
+                emit_volume_score_candidates=True,
+                seed=seed,
+            )
+            self._validate_volume_score_pipeline(score_refresh_dataset.pipeline)
+            extra_datasets["score_refresh_train"] = score_refresh_dataset
+            extra_callbacks.append(
+                VolumeResidualScoreRefreshCallbackConfig(
+                    every_n_epochs=volume_score_refresh_every_n_epochs,
+                    dataset_key="score_refresh_train",
+                    score_dir=volume_score_dir,
+                    query_chunk_size=volume_score_query_chunk_size,
+                    score_key=volume_score_key,
+                )
+            )
 
         if include_evaluation:
             extra_callbacks = self.evaluation_callbacks(model_kind, batch_size=batch_size) + extra_callbacks
@@ -119,3 +184,8 @@ class ShapeNetCarPreset(AeroCFDPreset):
             extra_datasets=extra_datasets,
             **kwargs,
         )
+
+    @staticmethod
+    def _validate_volume_score_pipeline(pipeline: Any) -> None:
+        if (pipeline.num_volume_anchor_points or 0) <= 0 or (pipeline.num_surface_anchor_points or 0) <= 0:
+            raise ValueError("Volume score sampling requires an anchor-point AB-UPT pipeline.")

@@ -19,6 +19,8 @@ from noether.data.pipeline.sample_processors import (
 
 from ..sample_processors import (
     AnchorPointSamplingSampleProcessor,
+    LoadSamplingScoreSampleProcessor,
+    ScoreAwareAnchorPointSamplingSampleProcessor,
 )
 
 
@@ -51,6 +53,20 @@ class AeroCFDPipelineConfig(PipelineConfig):
     """Number of volume anchor points to sample for AB-UPT."""
     num_surface_anchor_points: int | None = 0
     """Number of surface anchor points to sample for AB-UPT."""
+    use_volume_score_sampling: bool = False
+    """Whether to sample volume anchors from per-point sampling scores."""
+    volume_score_dir: str | None = None
+    """Directory containing per-sample volume sampling score sidecars."""
+    volume_score_key: str = "volume_sampling_score"
+    """Sample key used for per-point volume sampling scores."""
+    volume_score_uniform_fraction: float = 0.3
+    """Fraction of uniform probability mixed into score-aware volume anchor sampling."""
+    volume_score_gamma: float = 1.0
+    """Exponent applied to volume sampling scores before normalization."""
+    volume_score_eps: float = 1e-8
+    """Numerical epsilon for score-aware volume anchor sampling."""
+    emit_volume_score_candidates: bool = False
+    """Whether to keep full volume candidates for score refresh callbacks."""
     use_surface_position_as_input: bool = False
     """Whether to pass ``surface_position`` through as a model input. Required only when a downstream
     callback (e.g. the showcase eval pipeline) needs it; off by default since variable-sized point clouds
@@ -151,6 +167,13 @@ class AeroMultistagePipeline(MultiStagePipeline):
         self.num_geometry_points = pipeline_config.num_geometry_points
         self.num_geometry_supernodes = pipeline_config.num_geometry_supernodes
         self.use_query_positions = False
+        self.use_volume_score_sampling = pipeline_config.use_volume_score_sampling
+        self.volume_score_dir = pipeline_config.volume_score_dir
+        self.volume_score_key = pipeline_config.volume_score_key
+        self.volume_score_uniform_fraction = pipeline_config.volume_score_uniform_fraction
+        self.volume_score_gamma = pipeline_config.volume_score_gamma
+        self.volume_score_eps = pipeline_config.volume_score_eps
+        self.emit_volume_score_candidates = pipeline_config.emit_volume_score_candidates
 
         self.use_physics_features = (
             pipeline_config.use_physics_features
@@ -456,44 +479,94 @@ class AeroMultistagePipeline(MultiStagePipeline):
             "surface_anchor_position",
             "volume_anchor_position",
         ]
-        processors = [
-            DuplicateKeysSampleProcessor(key_map={"surface_position": "geometry_position"}),
-            PointSamplingSampleProcessor(
-                items={"geometry_position"},
-                num_points=self.num_geometry_points,
-                seed=None if self.seed is None else self.seed + 1,
-            ),
-            SupernodeSamplingSampleProcessor(
-                item="geometry_position",
-                num_supernodes=self.num_geometry_supernodes,
-                supernode_idx_key="geometry_supernode_idx",
-                seed=None if self.seed is None else self.seed + 2,
-            ),
-            # subsample surface data
-            AnchorPointSamplingSampleProcessor(
-                items={"surface_position"}
-                | set(self.surface_targets)
-                | (self.surface_features if self.use_physics_features else set()),
-                num_points=self.num_surface_anchor_points,
-                keep_queries=self.use_query_positions,
-                to_prefix_and_postfix=_split_by_underscore,
-                to_prefix_midfix_postfix=_split_three_or_none,
-                seed=None if self.seed is None else self.seed + 3,
-            ),
-            # subsample volume data
-            AnchorPointSamplingSampleProcessor(
-                items={"volume_position"}
-                | set(self.volume_targets)
-                | (self.volume_features if self.use_physics_features else set()),
+
+        volume_anchor_items = (
+            {"volume_position"}
+            | set(self.volume_targets)
+            | (self.volume_features if self.use_physics_features else set())
+        )
+        if self.use_volume_score_sampling:
+            volume_anchor_processor = ScoreAwareAnchorPointSamplingSampleProcessor(
+                items=volume_anchor_items,
                 num_points=self.num_volume_anchor_points,
                 keep_queries=self.use_query_positions,
                 to_prefix_and_postfix=_split_by_underscore,
                 to_prefix_midfix_postfix=_split_three_or_none,
                 seed=None if self.seed is None else self.seed + 4,
-            ),
-            RenameKeysSampleProcessor(key_map={DataKeys.as_anchor(key): key for key in self.volume_targets}),
-            RenameKeysSampleProcessor(key_map={DataKeys.as_anchor(key): key for key in self.surface_targets}),
-        ]
+                score_key=self.volume_score_key,
+                uniform_fraction=self.volume_score_uniform_fraction,
+                gamma=self.volume_score_gamma,
+                eps=self.volume_score_eps,
+            )
+            self.default_collator_items += [
+                "volume_anchor_sampling_prob",
+                "volume_anchor_sampling_weight",
+            ]
+        else:
+            volume_anchor_processor = AnchorPointSamplingSampleProcessor(
+                items=volume_anchor_items,
+                num_points=self.num_volume_anchor_points,
+                keep_queries=self.use_query_positions,
+                to_prefix_and_postfix=_split_by_underscore,
+                to_prefix_midfix_postfix=_split_three_or_none,
+                seed=None if self.seed is None else self.seed + 4,
+            )
+
+        processors = []
+        if self.use_volume_score_sampling and self.volume_score_dir is not None:
+            processors.append(
+                LoadSamplingScoreSampleProcessor(
+                    score_dir=self.volume_score_dir,
+                    score_key=self.volume_score_key,
+                )
+            )
+        if self.emit_volume_score_candidates:
+            if "volume_velocity" not in self.volume_targets:
+                raise ValueError("Volume score refresh requires volume_velocity in the data specs.")
+            processors.append(
+                DuplicateKeysSampleProcessor(
+                    key_map={
+                        "volume_position": "volume_score_position",
+                        "volume_velocity": "volume_score_velocity",
+                    }
+                )
+            )
+            self.default_collator_items += [
+                "volume_score_position",
+                "volume_score_velocity",
+            ]
+
+        processors.extend(
+            [
+                DuplicateKeysSampleProcessor(key_map={"surface_position": "geometry_position"}),
+                PointSamplingSampleProcessor(
+                    items={"geometry_position"},
+                    num_points=self.num_geometry_points,
+                    seed=None if self.seed is None else self.seed + 1,
+                ),
+                SupernodeSamplingSampleProcessor(
+                    item="geometry_position",
+                    num_supernodes=self.num_geometry_supernodes,
+                    supernode_idx_key="geometry_supernode_idx",
+                    seed=None if self.seed is None else self.seed + 2,
+                ),
+                # subsample surface data
+                AnchorPointSamplingSampleProcessor(
+                    items={"surface_position"}
+                    | set(self.surface_targets)
+                    | (self.surface_features if self.use_physics_features else set()),
+                    num_points=self.num_surface_anchor_points,
+                    keep_queries=self.use_query_positions,
+                    to_prefix_and_postfix=_split_by_underscore,
+                    to_prefix_midfix_postfix=_split_three_or_none,
+                    seed=None if self.seed is None else self.seed + 3,
+                ),
+                # subsample volume data
+                volume_anchor_processor,
+                RenameKeysSampleProcessor(key_map={DataKeys.as_anchor(key): key for key in self.volume_targets}),
+                RenameKeysSampleProcessor(key_map={DataKeys.as_anchor(key): key for key in self.surface_targets}),
+            ]
+        )
         if self.use_physics_features:
             processors.extend(
                 [
