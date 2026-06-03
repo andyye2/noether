@@ -1,6 +1,7 @@
 #  Copyright © 2025 Emmi AI GmbH. All rights reserved.
 
 import pytest
+import numpy as np
 import torch
 
 from noether.data.pipeline.sample_processors import SupernodeSamplingSampleProcessor
@@ -103,6 +104,15 @@ def test_preprocess_deterministic():
 
     assert len(processed1["supernode_idx"]) == len(processed2["supernode_idx"])
     assert torch.equal(processed1["supernode_idx"], processed2["supernode_idx"])
+
+
+def test_preprocess_accepts_numpy_index():
+    sample = {"pos": torch.rand(10, 3), "index": np.int64(0)}
+    precollator = SupernodeSamplingSampleProcessor(item="pos", num_supernodes=4, seed=0)
+
+    processed = precollator(sample)
+
+    assert processed["supernode_idx"].shape == (4,)
 
 
 def test_denormalize():

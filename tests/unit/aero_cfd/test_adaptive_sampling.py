@@ -6,6 +6,7 @@ from collections import OrderedDict
 from contextlib import nullcontext
 from pathlib import Path
 
+import numpy as np
 import pytest
 import torch
 import torch.nn.functional as F
@@ -108,6 +109,15 @@ def test_score_aware_anchor_sampling_prefers_high_score_points() -> None:
     assert _anchor_indices(processed).tolist() == [3]
 
 
+def test_score_aware_anchor_sampling_accepts_numpy_index() -> None:
+    sample = _sample(num_points=8)
+    sample["index"] = np.int64(4)
+
+    processed = _make_score_sampler()(sample)
+
+    assert processed["volume_anchor_position"].shape == (3, 3)
+
+
 def test_score_aware_anchor_sampling_fallback_matches_random_sampler_without_scores() -> None:
     sample = _sample(num_points=8)
 
@@ -118,6 +128,15 @@ def test_score_aware_anchor_sampling_fallback_matches_random_sampler_without_sco
     assert torch.equal(score_processed["volume_anchor_velocity"], random_processed["volume_anchor_velocity"])
     assert torch.allclose(score_processed["volume_anchor_sampling_prob"], torch.full((3,), 1.0 / 8.0))
     assert torch.equal(score_processed["volume_anchor_sampling_weight"], torch.ones(3))
+
+
+def test_anchor_sampling_accepts_numpy_index() -> None:
+    sample = _sample(num_points=8)
+    sample["index"] = np.int64(4)
+
+    processed = _make_random_sampler()(sample)
+
+    assert processed["volume_anchor_position"].shape == (3, 3)
 
 
 @pytest.mark.parametrize(

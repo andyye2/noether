@@ -1,6 +1,7 @@
 #  Copyright © 2025 Emmi AI GmbH. All rights reserved.
 
 import pytest
+import numpy as np
 import torch
 
 from noether.data.pipeline.sample_processors import PointSamplingSampleProcessor
@@ -78,6 +79,15 @@ def test_point_sampling_precollator_deterministic():
 
     assert len(processed1["pos"]) == len(processed2["pos"])
     assert torch.equal(processed1["pos"], processed2["pos"])
+
+
+def test_point_sampling_precollator_accepts_numpy_index():
+    sample = {"pos": torch.rand(10, 3), "index": np.int64(0)}
+    precollator = PointSamplingSampleProcessor(items={"pos"}, num_points=4, seed=0)
+
+    processed = precollator(sample)
+
+    assert processed["pos"].shape == (4, 3)
 
 
 def test_point_sampling_precollator_invalid_num_points(sample_data):

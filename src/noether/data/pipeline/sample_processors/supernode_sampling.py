@@ -53,7 +53,7 @@ class SupernodeSamplingSampleProcessor(SampleProcessor):
         if self.seed is not None:
             if "index" not in output_sample:
                 raise ValueError("Sample index is required for deterministic supernode sampling with a seed.")
-            seed = output_sample["index"] + self.seed
+            seed = int(output_sample["index"]) + self.seed
             generator = torch.Generator().manual_seed(seed)
         perm = torch.randperm(cur_num_points, generator=generator)[: self.num_supernodes]
 
