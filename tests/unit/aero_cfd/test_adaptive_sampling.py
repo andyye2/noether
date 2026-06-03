@@ -457,6 +457,10 @@ def test_shapenet_preset_default_keeps_existing_trainer_and_uniform_sampling(tmp
     assert config.datasets["test"].pipeline.use_volume_score_sampling is False
 
 
+def test_shapenet_preset_excludes_missing_surface_area() -> None:
+    assert "surface_area" in ShapeNetCarPreset().excluded_properties
+
+
 def test_shapenet_preset_enables_score_sampling_only_for_train(tmp_path: Path) -> None:
     config = _build_shapenet_config(
         tmp_path,
