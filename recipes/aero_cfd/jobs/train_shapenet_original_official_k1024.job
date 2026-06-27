@@ -1,0 +1,74 @@
+#!/bin/bash -l
+#SBATCH --job-name=orig-k1024-off
+#SBATCH --account=ssingh76-ic
+#SBATCH --partition=IllinoisComputes-GPU
+#SBATCH --gres=gpu:1
+#SBATCH --exclude=ccc0390
+#SBATCH --cpus-per-task=8
+#SBATCH --time=48:00:00
+#SBATCH --output=/scratch/%u/ABUPT/slurm/%x-%j.out
+
+set -euo pipefail
+
+module purge || true
+module load anaconda3/2024.10 || module load anaconda3
+
+PROJECT_ROOT="${PROJECT_ROOT:-/scratch/$USER/ABUPT/noether-original-0e1400b}"
+ENV_ROOT="${ENV_ROOT:-/scratch/$USER/ABUPT/.venv}"
+DATA_ROOT="${DATA_ROOT:-/scratch/$USER/data/shapenet_car}"
+RUN_NAME="${RUN_NAME:-original_official_k1024_seed0}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-/scratch/$USER/ABUPT/outputs/$RUN_NAME}"
+EXPECTED_COMMIT="${EXPECTED_COMMIT:-0e1400b}"
+SEED="${SEED:-0}"
+SURFACE_ANCHORS="${SURFACE_ANCHORS:-1024}"
+VOLUME_ANCHORS="${VOLUME_ANCHORS:-1024}"
+
+if [ ! -x "$ENV_ROOT/bin/python" ]; then
+  ENV_ROOT=/scratch/$USER/ABUPT/noether/.venv
+fi
+
+export PYTHONPATH="$PROJECT_ROOT/src:$PROJECT_ROOT/recipes/aero_cfd"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-/scratch/$USER/ABUPT/.cache/uv}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/scratch/$USER/ABUPT/.cache}"
+export MPLCONFIGDIR="${MPLCONFIGDIR:-/scratch/$USER/ABUPT/.cache/matplotlib}"
+
+mkdir -p "$OUTPUT_ROOT" "$UV_CACHE_DIR" "$MPLCONFIGDIR" /scratch/$USER/ABUPT/slurm
+
+if [ ! -d "$PROJECT_ROOT/.git" ]; then
+  echo "PROJECT_ROOT must be a clean git worktree at $EXPECTED_COMMIT: $PROJECT_ROOT" >&2
+  exit 2
+fi
+
+actual_commit="$(git -C "$PROJECT_ROOT" rev-parse --short HEAD)"
+if [ "$actual_commit" != "$EXPECTED_COMMIT" ]; then
+  echo "Wrong noether commit: expected $EXPECTED_COMMIT, got $actual_commit at $PROJECT_ROOT" >&2
+  exit 2
+fi
+
+if [ -n "$(git -C "$PROJECT_ROOT" status --porcelain)" ]; then
+  echo "PROJECT_ROOT is dirty; refusing to run original baseline from an uncommitted tree." >&2
+  git -C "$PROJECT_ROOT" status --short
+  exit 2
+fi
+
+echo "host=$(hostname)"
+echo "date=$(date)"
+echo "project=$PROJECT_ROOT"
+echo "env=$ENV_ROOT"
+echo "data=$DATA_ROOT"
+echo "output=$OUTPUT_ROOT"
+echo "commit=$actual_commit"
+"$ENV_ROOT/bin/python" --version
+nvidia-smi
+
+cd "$PROJECT_ROOT/recipes/aero_cfd"
+
+uv run noether-train --hp configs/train_shapenet.yaml \
+  +experiment/shapenet=ab_upt \
+  tracker=disabled \
+  dataset_root="$DATA_ROOT" \
+  output_path="$OUTPUT_ROOT" \
+  +accelerator=gpu \
+  +seed="$SEED" \
+  pipeline.num_surface_anchor_points="$SURFACE_ANCHORS" \
+  pipeline.num_volume_anchor_points="$VOLUME_ANCHORS"
