@@ -1,0 +1,37 @@
+# @package _global_
+defaults:
+  - override /model: ab_upt
+  - override /tracker: development_tracker
+  - override /optimizer: lion
+
+name: shapenet-car-ab-upt-wall-no-pen
+
+model:
+  supernode_pooling_config:
+    radius: 9
+  forward_properties:
+    - geometry_position
+    - geometry_supernode_idx
+    - geometry_batch_idx
+    - surface_anchor_position
+    - volume_anchor_position
+    - query_volume_position
+
+pipeline:
+  num_geometry_points: 3586
+  num_geometry_supernodes: 3586
+  num_surface_anchor_points: 3586
+  num_volume_anchor_points: 4096
+  use_wall_no_penetration_queries: true
+  wall_query_offset: 0.952381
+
+trainer:
+  precision: float16
+  target_properties:
+    - surface_pressure_target
+    - volume_velocity_target
+    - wall_query_normals
+  wall_no_penetration_weight: 0.03
+  wall_no_penetration_velocity_scale: 20.0
+  volume_velocity_mean: [0.00293915, -0.0230546, 17.546032]
+  volume_velocity_std: [1.361689, 1.267649, 5.850353]

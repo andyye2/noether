@@ -18,6 +18,7 @@ from noether.data.pipeline.sample_processors import (
 
 from ..sample_processors import (
     AnchorPointSamplingSampleProcessor,
+    WallNoPenetrationQuerySampleProcessor,
 )
 
 
@@ -36,6 +37,10 @@ class AeroCFDPipelineConfig(PipelineConfig):
     """Number of volume queries for the output function. If 0 or None, no query points are sampled."""
     use_physics_features: bool = False
     """Whether to use physics features (SDF, normals) alongside input coordinates."""
+    use_wall_no_penetration_queries: bool = False
+    """Whether to create near-wall volume queries for no-penetration training."""
+    wall_query_offset: float = 0.0
+    """Offset along surface normals in normalized position units."""
     dataset_statistics: AeroStatsSchema | None = None
     """Dataset statistics for normalization of input features."""
     sample_query_points: bool = True
@@ -146,6 +151,10 @@ class AeroMultistagePipeline(MultiStagePipeline):
         self.num_geometry_points = pipeline_config.num_geometry_points
         self.num_geometry_supernodes = pipeline_config.num_geometry_supernodes
         self.use_query_positions = False
+        self.use_wall_no_penetration_queries = pipeline_config.use_wall_no_penetration_queries
+        self.wall_query_offset = pipeline_config.wall_query_offset
+        if self.use_wall_no_penetration_queries and not self.use_anchor_points:
+            raise ValueError("Wall no-penetration queries require anchor-point sampling.")
 
         self.use_physics_features = (
             pipeline_config.use_physics_features
@@ -438,12 +447,17 @@ class AeroMultistagePipeline(MultiStagePipeline):
     def _get_anchor_point_sampling_sample_processor(self) -> list[SampleProcessor]:
         """Get the anchor point sampling sample processor."""
         if self.num_volume_anchor_points > 0 and self.num_surface_anchor_points > 0:
-            # make sure defa
-            self.default_collator_items += [
+            surface_items = {"surface_position"} | set(self.surface_targets)
+            collator_items = [
                 "surface_anchor_position",
                 "volume_anchor_position",
             ]
-            return [
+            if self.use_wall_no_penetration_queries:
+                surface_items.add("surface_normals")
+                collator_items += ["query_volume_position", "wall_query_normals"]
+            self.default_collator_items += collator_items
+
+            sample_processors: list[SampleProcessor] = [
                 DuplicateKeysSampleProcessor(key_map={"surface_position": "geometry_position"}),
                 PointSamplingSampleProcessor(
                     items={"geometry_position"},
@@ -456,27 +470,34 @@ class AeroMultistagePipeline(MultiStagePipeline):
                     supernode_idx_key="geometry_supernode_idx",
                     seed=None if self.seed is None else self.seed + 2,
                 ),
-                # subsample surface data
                 AnchorPointSamplingSampleProcessor(
-                    items={"surface_position"} | set(self.surface_targets),
+                    items=surface_items,
                     num_points=self.num_surface_anchor_points,
                     keep_queries=self.use_query_positions,
                     to_prefix_and_postfix=_split_by_underscore,
                     to_prefix_midfix_postfix=_split_three_or_none,
                     seed=None if self.seed is None else self.seed + 3,
                 ),
-                # subsample volume data
-                AnchorPointSamplingSampleProcessor(
-                    items={"volume_position"} | set(self.volume_targets),
-                    num_points=self.num_volume_anchor_points,
-                    keep_queries=self.use_query_positions,
-                    to_prefix_and_postfix=_split_by_underscore,
-                    to_prefix_midfix_postfix=_split_three_or_none,
-                    seed=None if self.seed is None else self.seed + 4,
-                ),
-                RenameKeysSampleProcessor(key_map={DataKeys.as_anchor(key): key for key in self.volume_targets}),
-                RenameKeysSampleProcessor(key_map={DataKeys.as_anchor(key): key for key in self.surface_targets}),
             ]
+            if self.use_wall_no_penetration_queries:
+                sample_processors.append(
+                    WallNoPenetrationQuerySampleProcessor(offset=self.wall_query_offset)
+                )
+            sample_processors.extend(
+                [
+                    AnchorPointSamplingSampleProcessor(
+                        items={"volume_position"} | set(self.volume_targets),
+                        num_points=self.num_volume_anchor_points,
+                        keep_queries=self.use_query_positions,
+                        to_prefix_and_postfix=_split_by_underscore,
+                        to_prefix_midfix_postfix=_split_three_or_none,
+                        seed=None if self.seed is None else self.seed + 4,
+                    ),
+                    RenameKeysSampleProcessor(key_map={DataKeys.as_anchor(key): key for key in self.volume_targets}),
+                    RenameKeysSampleProcessor(key_map={DataKeys.as_anchor(key): key for key in self.surface_targets}),
+                ]
+            )
+            return sample_processors
 
         else:
             raise ValueError(
