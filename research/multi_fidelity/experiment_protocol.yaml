@@ -1,0 +1,491 @@
+schema_version: 1
+study_id: shapenet_ab_upt_to_drivaerml_hf_efficiency
+status: frozen_before_first_target_job
+
+protocol_integrity:
+  yaml_role: raw_file_sha256_integrity_anchor
+  complete_runtime_source_of_truth: false
+  strict_runner_parsed_fields:
+    - study_id
+    - status
+    - data.paired_replicates
+    - source.primary_checkpoint_tag
+    - source.primary_sha256
+  runtime_binding_sources:
+    - frozen implementation
+    - explicit CLI arguments
+    - resolved config
+    - frozen manifest
+    - train-subset statistics artifact
+    - training provenance sidecar
+    - evaluation audit
+  downstream_raw_sha256_binding:
+    - manifests
+    - subset statistics
+    - training provenance
+    - evaluation provenance
+  rematerialize_manifests_and_statistics_after_any_yaml_change: true
+
+question: >-
+  Does initialization from the fixed ShapeNet-Car AB-UPT checkpoint reduce the
+  number of labeled DrivAerML high-fidelity runs needed to reach a fixed test
+  error, relative to an isomorphic scratch model under matched target updates?
+
+evidence_scope:
+  demonstrated:
+    - source_checkpoint_tensor_shape_compatibility
+    - strict_source_initialization
+    - train_plus_validation_config_construction
+  not_demonstrated:
+    - real_DrivAerML_P0_or_P1_training
+    - completed_real_train_checkpoint_frozen_evaluation_chain
+    - semantic_transfer_or_sample_efficiency
+  risk_controls_real_validation_status: pending_P0_P1
+
+source:
+  output_path: /home/feng/Projects/ABUPT/outputs
+  run_id: 2026-04-25_7d0mv
+  stage_name: train
+  model_name: ab_upt
+  primary_checkpoint_tag: latest
+  primary_sha256: 261a46b7464d50c26301db60758feaabc27ce3d4f30b511e826201d32154fe38
+  strict_confirmatory_binding:
+    protocol_tag_and_sha_required: true
+    audited_code_constant_must_match: true
+    checkpoint_file_bytes_must_match: true
+    cli_override_forbidden: true
+  sensitivity_checkpoints:
+    - tag: best_model.loss.test.total
+      sha256: 221ce5a1a6803876b5d0fc6157a8f06aa5299abe104c4ee9fcbef3f0aaffc5f7
+      role: planned_source_sensitivity
+    - tag: ema=0.9999_cp=latest
+      sha256: f1200056bee2a2be2cac0f390bf9aaa049d1b1f29b680bab0721969ad8ba4aeb
+      role: planned_source_sensitivity
+  sensitivity_execution:
+    status: planned_not_implemented_by_strict_confirmatory_runner
+    separate_nonconfirmatory_path_required: true
+  source_selection_limitation: >-
+    ShapeNet-Car has no validation split. Test-selected source weights are
+    sensitivity-only; the fixed epoch-500 raw checkpoint is confirmatory.
+
+data:
+  root: /scratch/andyye2/data/drivaerml_subsampled_10x
+  visible_runs: 484
+  split_counts: {train: 400, val: 34, test: 50, hidden_test: 16}
+  immutable_official_splits: true
+  train_sample_sizes: [25, 50, 100, 200, 400]
+  nested_prefixes: true
+  subset_rng: numpy_PCG64
+  paired_replicates:
+    - {replicate: 0, subset_seed: 1103, model_seed: 7103}
+    - {replicate: 1, subset_seed: 2207, model_seed: 8207}
+    - {replicate: 2, subset_seed: 3301, model_seed: 9301}
+    - {replicate: 3, subset_seed: 4409, model_seed: 1409}
+    - {replicate: 4, subset_seed: 5519, model_seed: 2519}
+    - {replicate: 5, subset_seed: 6619, model_seed: 3619}
+    - {replicate: 6, subset_seed: 7723, model_seed: 4723}
+    - {replicate: 7, subset_seed: 8837, model_seed: 5837}
+
+  manifest_requirements:
+    - ordered base-dataset indices
+    - ordered design IDs
+    - official validation and test IDs
+    - protocol raw-file SHA256
+    - implementation Git commit and dirty boolean
+    - generator name and version
+    - canonical-payload SHA256
+    - raw-file SHA256 computed by consumers
+  manifest_integrity_boundary:
+    canonical_payload_sha256_recomputed: true
+    raw_file_sha256_binds_subset_statistics: true
+    implementation_binding_fields: [git_commit, dirty_boolean]
+    exact_dirty_diff_bound_by_manifest: false
+  production_manifest_policy:
+    clean_commit_required: true
+    implementation_git_dirty_required: false
+    rematerialize_after_final_protocol_and_code_freeze: true
+    location: external_to_git_worktree
+    statistics_and_training_generator_option: --manifest-root
+    repository_dirty_manifests_are_production_inputs: false
+
+  target_statistics:
+    production_scan_requires_frozen_protocol: true
+    fit_labels_from_current_train_subset_only: true
+    vector_frame: shapenet
+    fixed_position_bounds: [-40.0, 80.0]
+    fixed_position_bounds_role: public_CFD_domain_input_metadata
+    cache_key_fields: [manifest_sha256, train_subset_size, task, coordinate_frame]
+    artifact_binding_fields_enforced:
+      - study_id
+      - protocol_sha256
+      - provenance.manifest_sha256
+      - train_subset_size
+      - coordinate_frame
+      - leakage_guard.target_splits_read
+      - task-required normalizer keys
+    task_identity_note: >-
+      The cache path includes task; the artifact is accepted through its
+      required field-statistic keys rather than a standalone task scalar.
+    full_artifact_sha256_recorded_in_training_sidecar: true
+
+  integrity_policy:
+    finite_values_required: true
+    no_silent_run_drops: true
+    failures_recorded_by_run_and_field: true
+
+preprocessing:
+  primary_coordinate_frame:
+    name: shapenet
+    transform_direction: forward_DrivAer_to_ShapeNet_before_normalization
+    target_to_source_permutation: [1, 2, 0]
+    apply_before_normalization_to:
+      - surface_position
+      - volume_position
+      - surface_friction
+      - volume_velocity
+      - volume_vorticity
+      - normals_if_enabled
+  evaluation_physical_metric_recovery:
+    inverse_normalization: true
+    inverse_coordinate_transform: false
+    vector_component_frame: selected_run_coordinate_frame
+  raw_frame_ablation: true
+  position_scale: 1000.0
+  rope_max_wavelength: 10000.0
+  graph_radius: 9.0
+  required_graph_preflight:
+    implementation: research/multi_fidelity/tools/audit_radius_graph.py
+    input: real_strict_runner_dry_run_resolved_config
+    max_degree: 32
+    report_neighbor_count_quantiles: [0.0, 0.01, 0.05, 0.5, 0.95, 0.99, 1.0]
+    report_degree_cap_fraction: true
+    fail_if_zero_neighbor_fraction_gt: 0.001
+    note: capped degree 32 is not an uncapped physical-neighbor count
+
+model:
+  kind: noether.modeling.models.aerodynamics.AeroABUPT
+  hidden_dim: 192
+  geometry_depth: 1
+  num_heads: 3
+  mlp_expansion_factor: 4
+  physics_blocks:
+    - perceiver
+    - self
+    - cross
+    - self
+    - cross
+    - self
+    - cross
+    - self
+    - cross
+    - self
+  num_domain_decoder_blocks: {surface: 2, volume: 2}
+  readout_reset_pattern: backbone.domain_decoder_projections
+  invariant_between_scratch_and_transfer: true
+  pipeline_primary:
+    num_geometry_points: 16384
+    num_geometry_supernodes: 1024
+    num_surface_anchor_points: 512
+    num_volume_anchor_points: 512
+  sampling_density_ablation_at_n: 100
+
+tasks:
+  common:
+    role: confirmatory
+    fields: [surface_pressure, volume_velocity]
+    field_weights: {surface_pressure: 1.0, volume_velocity: 1.0}
+  full:
+    role: gated_secondary
+    fields: [surface_pressure, surface_friction, volume_pressure, volume_velocity, volume_vorticity]
+    display_names:
+      surface_pressure: surface pressure
+      surface_friction: surface wall shear stress
+      volume_pressure: volume total-pressure coefficient
+      volume_velocity: volume velocity
+      volume_vorticity: volume vorticity
+    note: volume_pressure loads volume_cell_totalpcoeff.pt
+
+methods:
+  scratch:
+    code: S
+    initialization: random
+    trainable: all
+  finetune:
+    code: P-FT
+    initialization: protocol_primary_source_trunk_plus_new_readouts
+    trainable: all_from_step_0
+  linear_probe:
+    code: P-LP
+    role: representation_diagnostic
+    trainable: readouts_only
+  gradual_unfreeze:
+    code: P-GU
+    stages_by_update_fraction:
+      - {start: 0.0, end: 0.1, trainable: [readouts]}
+      - {start: 0.1, end: 0.3, trainable: [readouts, domain_decoders]}
+      - {start: 0.3, end: 1.0, trainable: [all]}
+  lora:
+    code: P-LoRA
+    role: gated_extension_after_core_result
+    required_scope: all_linear_layers_including_geometry_encoder
+    pilot_ranks: [8, 32, 64]
+    implementation_status: not_implemented_in_strict_runner
+
+training:
+  effective_batch_size: 1
+  optimizer: Lion
+  base_learning_rate: 5.0e-5
+  end_learning_rate: 1.0e-6
+  weight_decay: 0.05
+  clip_grad_norm: 0.25
+  precision: float16
+  early_stopping: false
+  test_dataset_present_in_training_process: false
+  sampling:
+    training_pipeline_seed: null
+    resample_points_each_dataset_visit: true
+    data_loader_seed: model_seed
+    paired_methods_share_data_loader_seed: true
+    validation_pipeline_seed: 4242
+  target_checkpoint_policy:
+    primary:
+      tag: latest
+      semantics: final_raw_at_training_end
+    sensitivity:
+      tag: best_model.loss.val.total
+      semantics: target_best_validation
+    target_ema_generated: false
+  primary_budget:
+    name: compute_matched
+    optimizer_updates: 40000
+    epochs_by_n: {25: 1600, 50: 800, 100: 400, 200: 200, 400: 100}
+  cost_control_budget:
+    name: fixed_epoch
+    epochs: 100
+    updates_by_n: {25: 2500, 50: 5000, 100: 10000, 200: 20000, 400: 40000}
+  confirmatory_hyperparameter_policy:
+    target_validation_tuning: false
+    base_learning_rate_fixed_a_priori: 5.0e-5
+    p_ft_body_lr_multiplier_fixed_a_priori: 1.0
+    p_ft_decoder_lr_multiplier_fixed_a_priori: 1.0
+    rationale: >-
+      Keep S versus P-FT initialization-only. P-GU and P-LoRA are gated
+      secondary methods.
+  provenance_sidecar:
+    written_atomically_after_success: true
+    binds:
+      - protocol raw SHA256
+      - implementation commit, dirty state, and status SHA256
+      - manifest raw and canonical-payload SHA256
+      - target-statistics file SHA256
+      - source checkpoint SHA256
+      - task, strategy, method, replicate, N, frame, budget, and seeds
+      - resolved-config SHA256
+      - every target-model checkpoint SHA256
+
+evaluation:
+  one_split_per_run: true
+  allowed_splits: [val, test]
+  direct_runner_default_split: val
+  generator_split_must_be_explicit: true
+  test_access: one_coordinated_release_after_all_model_and_method_decisions
+  test_release_double_gate:
+    generator_requires_confirm_test_release: true
+    generated_test_command_carries_confirm_test_release: true
+    evaluator_independently_requires_confirm_test_release: true
+
+  command_generation:
+    requires_frozen_protocol: true
+    cell_source: recursive_training_provenance_sidecar_discovery_only
+    user_supplied_scientific_labels_allowed: false
+    inherited_and_validated_fields:
+      - task
+      - strategy_to_method
+      - replicate
+      - train_sample_size
+      - coordinate_frame
+      - budget
+      - manifest_path
+      - target_statistics_path
+      - run_id
+      - stage_name
+      - model_checkpoints_sha256
+    filters: [method, replicate, sample_size, task, budget, coordinate_frame]
+    checkpoint_tag_choices: [latest, best_model.loss.val.total]
+    cell_identity_includes: [task, method, replicate, sample_size, coordinate_frame, budget, checkpoint_identity]
+    primary_filters:
+      budget: compute_matched
+      coordinate_frame: shapenet
+      checkpoint_tag: latest
+    selected_checkpoint_sidecar_and_file_sha256_must_match: true
+
+  primary_anchor_output_policy:
+    surface_anchor_output_points_per_design: 16384
+    volume_anchor_output_points_per_design: 16384
+    fixed_pipeline_seed: 4242
+    deterministic_runtime_regeneration: true
+    materialized_index_artifact: false
+    requires_identical_code_torch_version_and_design_order_within_release: true
+  dense_full_grid_sensitivity:
+    status: planned_not_implemented
+    scope_if_implemented: selected_models_only
+
+  official_split_audit:
+    evaluation_audit_records_official_ids_and_count: true
+    official_test_design_count: 50
+    official_50_ids_must_be_verified_from_audits_before_analysis: true
+    analyzer_enforces_official_split_identity: true
+
+  checkpoint_policy:
+    primary_target_checkpoint_tag: latest
+    sensitivity_target_checkpoint_tag: best_model.loss.val.total
+    target_ema_available: false
+    source_checkpoint_sensitivities_are_not_target_evaluation_tags: true
+
+  metrics:
+    per_design_per_field: [relative_L2, MAE]
+    common_macro: equal_field_mean_of_log_relative_L2
+    full_macro: equal_field_mean_of_log_relative_L2
+    physical_units_after_inverse_normalization: true
+    inverse_coordinate_transform: false
+    no_anchor_or_mesh_point_as_independent_statistical_unit: true
+
+analysis:
+  primary_contrast: common_compute_matched_P-FT_vs_S_AULC
+  aulc_axis: log2_train_sample_count
+  error_ratio: exp(mean(log_error_transfer_minus_log_error_scratch))
+  practical_negative_transfer_margin: 1.05
+
+  input_contract:
+    complete_paired_rectangular_grid_required: true
+    official_50_test_IDs_verified_by_analyzer: true
+    official_test_identity_source: DrivAerMLDefaultSplitIDs_and_metric_rows
+
+  sample_efficiency:
+    target: scratch_n200_error
+    interpolation: monotone_isotonic_in_log_sample_count
+    extrapolation: forbidden
+    ratio: N_scratch_at_target_over_N_transfer_at_target
+    CI_requires_every_bootstrap_draw_identifiable: true
+    CI_withheld_if_any_null_or_unidentifiable_crossing: true
+    null_or_unidentifiable_crossing_cannot_pass_success_gate: true
+
+  uncertainty:
+    method: paired_two_way_crossed_bootstrap
+    bootstrap_draws: 10000
+    resample_axes: [paired_training_replicate, test_design]
+    preserve_pairing_across: [method, field, sample_size]
+    confidence_intervals: pointwise_unadjusted
+    simultaneous_confidence_intervals_claimed: false
+
+  exact_tests:
+    AULC:
+      method: one_sided_exact_replicate_level_paired_sign_flip
+      alternative: transfer_error_lower
+      multiplicity_adjustment: none_single_primary_hypothesis
+    per_n_common:
+      method: one_sided_exact_replicate_level_paired_sign_flip
+      alternative: transfer_error_lower
+
+  multiplicity:
+    per_n_common_p_values:
+      method: Holm
+      confidence_intervals_adjusted: false
+    AULC_p_value:
+      method: none_single_primary_hypothesis
+    full_field_by_n:
+      planned_method: Holm
+      implementation_status: not_implemented
+      P3_confirmatory_inference_status: blocked
+    exploratory: BH_FDR_or_pointwise_confidence_intervals_only
+
+success_gate:
+  all_required: true
+  conditions:
+    - common_AULC_error_ratio_point_estimate_lte_0.90
+    - common_AULC_pointwise_95CI_upper_lt_1.0
+    - sample_efficiency_ratio_point_estimate_gte_1.5
+    - sample_efficiency_fully_identifiable_pointwise_95CI_lower_gt_1.0
+    - n400_pointwise_error_ratio_95CI_upper_lt_1.05
+  null_or_unidentifiable_sample_efficiency_crossing_fails_gate: true
+  interpretation_if_only_convergence_is_faster: optimization_or_compute_benefit_not_HF_sample_saving
+
+futility_and_failure:
+  val_only_futility:
+    checkpoint_tag: latest
+    checkpoint_semantics: final_raw
+    weight_stream: raw_non_EMA
+    endpoint: equal_field_log_macro_relative_L2_on_validation_designs
+    sample_sizes: [50, 100]
+    replicates: [0, 1, 2]
+    stop_if_each_n_median_ratio_gte: 1.10
+    and_all_six_paired_ratios_gt: 1.0
+    action: stop_raw_P-FT_and_audit_axes_normalization_before_adapters
+    tool_scope:
+      validates_rectangular_grid_N_replicates_and_numeric_rule: true
+      CSV_schema_proves_split_checkpoint_or_weight_stream: false
+      confirm_final_raw_val_flag_role: caller_assertion_only
+      required_external_provenance:
+        - training sidecars
+        - per-cell validation evaluation audits
+        - merge provenance
+  algorithmic_failure: stop_method_if_at_least_2_of_3_runs_nan_or_diverge
+  infrastructure_retry: once_with_identical_seed_and_manifest
+  common_gate_required_before_P3_release: true
+  full_inference_requires_implemented_field_by_n_Holm: true
+  test_must_not_drive_any_gate: true
+
+phases:
+  - {id: P0, task: common_and_full_smoke, jobs_approx: 6, real_status: pending}
+  - {id: P1, task: common_S_vs_P-FT_first_3_replicates_all_N, jobs: 30, real_status: pending}
+  - {id: P2, task: common_S_vs_P-FT_add_5_replicates_all_N, jobs: 50, release_after: P1_gate}
+  - {id: P2a, task: common_fixed_epoch_control_first_3_replicates, jobs: 30}
+  - {id: P2b, task: common_P-LP_and_P-GU_at_N50_N100_first_3, jobs: 12}
+  - {id: P2c, task: raw_axis_ablation_S_and_P-FT_at_N50_N100_first_3, jobs: 12}
+  - id: P3
+    task: gated_full_S_vs_P-FT_N50_N100_N200_N400_first_5
+    jobs: 40
+    release_after: common_gate
+    confirmatory_inference_status: blocked_until_full_field_by_n_Holm_is_implemented
+
+implementation:
+  components:
+    manifest_materialization: implemented
+    train_subset_statistics: implemented
+    forward_coordinate_transform: implemented
+    strict_training_and_config_builder: implemented
+    training_provenance_sidecar: implemented
+    real_config_radius_graph_audit: implemented
+    statistics_command_generator_external_manifest_root: implemented
+    training_command_generator_external_manifest_root: implemented
+    provenance_sourced_evaluation_command_generator: implemented
+    single_split_evaluator_and_evaluation_audit: implemented
+    deterministic_metric_CSV_merge_and_provenance: implemented
+    validation_futility_rule: implemented_with_external_provenance_requirement
+    common_task_analysis: implemented
+    dense_full_grid_evaluation: planned_not_implemented
+    full_field_by_n_Holm_inference: planned_not_implemented
+    source_checkpoint_sensitivity_execution: planned_not_implemented
+    target_LoRA: planned_not_implemented
+  no_hard_coded_test_count_in_protocol: true
+  final_offline_validation_reference: execution_conclusion
+
+deployment_prerequisites:
+  before_real_strict_dry_run:
+    - final clean code staged
+    - final protocol frozen
+    - external clean manifests rematerialized
+    - required train-subset statistics recomputed
+    - dataset path available
+    - protocol-locked primary source checkpoint staged
+  note: >-
+    Strict dry-run reads and validates manifests, statistics, and the source
+    checkpoint during config construction; these are prerequisites, not later
+    outputs.
+
+compute_budget:
+  unit: C0_equals_one_N400_40k_update_source_architecture_run_on_target_GPU
+  profile_before_release: true
+  estimated_core_matrix: 144_C0_before_contingency
+  contingency_fraction: 0.15
+  note: existing_7_H100_hour_showcase_is_optimistic_and_not_a_measurement_for_this_model

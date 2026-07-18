@@ -1,0 +1,38 @@
+{
+  "common": {
+    "checkpoint": "/home/feng/Projects/ABUPT/outputs/2026-04-25_7d0mv/train/checkpoints/ab_upt_cp=latest_model.th",
+    "checkpoint_sha256": "261a46b7464d50c26301db60758feaabc27ce3d4f30b511e826201d32154fe38",
+    "compatible_fraction_of_trainable_parameters": 0.9997802512669799,
+    "compatible_state_elements": 7006538,
+    "compatible_trainable_parameters": 7006464,
+    "missing_keys": [],
+    "reset_pattern": "backbone.domain_decoder_projections",
+    "reset_trainable_parameters": 1540,
+    "source_state_tensors": 265,
+    "state_buffer_elements": 74,
+    "strict_load_succeeded": true,
+    "target_state_tensors": 269,
+    "task": "common",
+    "total_state_elements": 7008078,
+    "total_trainable_parameters": 7008004,
+    "unexpected_keys": []
+  },
+  "full": {
+    "checkpoint": "/home/feng/Projects/ABUPT/outputs/2026-04-25_7d0mv/train/checkpoints/ab_upt_cp=latest_model.th",
+    "checkpoint_sha256": "261a46b7464d50c26301db60758feaabc27ce3d4f30b511e826201d32154fe38",
+    "compatible_fraction_of_trainable_parameters": 0.9995875512083494,
+    "compatible_state_elements": 7006538,
+    "compatible_trainable_parameters": 7006464,
+    "missing_keys": [],
+    "reset_pattern": "backbone.domain_decoder_projections",
+    "reset_trainable_parameters": 2891,
+    "source_state_tensors": 265,
+    "state_buffer_elements": 74,
+    "strict_load_succeeded": true,
+    "target_state_tensors": 269,
+    "task": "full",
+    "total_state_elements": 7009429,
+    "total_trainable_parameters": 7009355,
+    "unexpected_keys": []
+  }
+}

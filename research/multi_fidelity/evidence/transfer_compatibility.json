@@ -1,0 +1,70 @@
+{
+  "common": {
+    "checkpoint": "/home/feng/Projects/ABUPT/local_runs/original_official_k1024_volume_best_e500/local_volbest_e500_20260628_2115/train/checkpoints/ab_upt_cp=best_model.loss.test.volume_velocity_mse_model.th",
+    "compatible_fraction_of_all_target_parameters": 0.9997802535873602,
+    "compatible_fraction_of_nonreset_target_parameters": 1.0,
+    "compatible_parameter_count": 7006538,
+    "compatible_tensor_count": 261,
+    "deliberately_reset_source": [
+      "backbone.domain_decoder_projections.surface.project.bias",
+      "backbone.domain_decoder_projections.surface.project.weight",
+      "backbone.domain_decoder_projections.volume.project.bias",
+      "backbone.domain_decoder_projections.volume.project.weight"
+    ],
+    "deliberately_reset_target": [
+      "backbone.domain_decoder_projections.surface.linear.project.bias",
+      "backbone.domain_decoder_projections.surface.linear.project.weight",
+      "backbone.domain_decoder_projections.surface.norm_final.bias",
+      "backbone.domain_decoder_projections.surface.norm_final.weight",
+      "backbone.domain_decoder_projections.volume.linear.project.bias",
+      "backbone.domain_decoder_projections.volume.linear.project.weight",
+      "backbone.domain_decoder_projections.volume.norm_final.bias",
+      "backbone.domain_decoder_projections.volume.norm_final.weight"
+    ],
+    "nonreset_target_parameter_count": 7006538,
+    "reset_patterns": [
+      "backbone.domain_decoder_projections"
+    ],
+    "shape_mismatches": {},
+    "source_only": [],
+    "source_tensor_count": 265,
+    "target_only": [],
+    "target_parameter_count": 7008078,
+    "target_tensor_count": 269,
+    "task": "common"
+  },
+  "full": {
+    "checkpoint": "/home/feng/Projects/ABUPT/local_runs/original_official_k1024_volume_best_e500/local_volbest_e500_20260628_2115/train/checkpoints/ab_upt_cp=best_model.loss.test.volume_velocity_mse_model.th",
+    "compatible_fraction_of_all_target_parameters": 0.9995875555626571,
+    "compatible_fraction_of_nonreset_target_parameters": 1.0,
+    "compatible_parameter_count": 7006538,
+    "compatible_tensor_count": 261,
+    "deliberately_reset_source": [
+      "backbone.domain_decoder_projections.surface.project.bias",
+      "backbone.domain_decoder_projections.surface.project.weight",
+      "backbone.domain_decoder_projections.volume.project.bias",
+      "backbone.domain_decoder_projections.volume.project.weight"
+    ],
+    "deliberately_reset_target": [
+      "backbone.domain_decoder_projections.surface.linear.project.bias",
+      "backbone.domain_decoder_projections.surface.linear.project.weight",
+      "backbone.domain_decoder_projections.surface.norm_final.bias",
+      "backbone.domain_decoder_projections.surface.norm_final.weight",
+      "backbone.domain_decoder_projections.volume.linear.project.bias",
+      "backbone.domain_decoder_projections.volume.linear.project.weight",
+      "backbone.domain_decoder_projections.volume.norm_final.bias",
+      "backbone.domain_decoder_projections.volume.norm_final.weight"
+    ],
+    "nonreset_target_parameter_count": 7006538,
+    "reset_patterns": [
+      "backbone.domain_decoder_projections"
+    ],
+    "shape_mismatches": {},
+    "source_only": [],
+    "source_tensor_count": 265,
+    "target_only": [],
+    "target_parameter_count": 7009429,
+    "target_tensor_count": 269,
+    "task": "full"
+  }
+}
