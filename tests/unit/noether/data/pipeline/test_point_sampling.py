@@ -69,8 +69,9 @@ def test_point_sampling_precollator_nondeterministic():
     assert not torch.equal(processed1["pos"], processed2["pos"])
 
 
-def test_point_sampling_precollator_deterministic():
-    sample = {"pos": torch.rand(10, 3), "index": 0}
+@pytest.mark.parametrize("sample_index", [0, torch.tensor(0)])
+def test_point_sampling_precollator_deterministic(sample_index):
+    sample = {"pos": torch.rand(10, 3), "index": sample_index}
     precollator = PointSamplingSampleProcessor(items={"pos"}, num_points=4, seed=0)
 
     processed1 = precollator(sample)
@@ -78,6 +79,14 @@ def test_point_sampling_precollator_deterministic():
 
     assert len(processed1["pos"]) == len(processed2["pos"])
     assert torch.equal(processed1["pos"], processed2["pos"])
+
+
+def test_point_sampling_precollator_rejects_non_integer_index():
+    sample = {"pos": torch.rand(10, 3), "index": 0.5}
+    precollator = PointSamplingSampleProcessor(items={"pos"}, num_points=4, seed=0)
+
+    with pytest.raises(TypeError):
+        precollator(sample)
 
 
 def test_point_sampling_precollator_invalid_num_points(sample_data):

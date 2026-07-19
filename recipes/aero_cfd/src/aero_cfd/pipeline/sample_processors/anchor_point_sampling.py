@@ -1,6 +1,7 @@
 #  Copyright © 2025 Emmi AI GmbH. All rights reserved.
 
 from collections.abc import Callable
+import operator
 from typing import Any
 
 import torch
@@ -61,7 +62,7 @@ class AnchorPointSamplingSampleProcessor(SampleProcessor):
         if self.seed is not None:
             if "index" not in output_sample:
                 raise ValueError("Sample index is required for deterministic point sampling with a seed.")
-            seed = output_sample["index"] + self.seed
+            seed = operator.index(output_sample["index"]) + self.seed
             generator = torch.Generator().manual_seed(seed)
         else:
             generator = None

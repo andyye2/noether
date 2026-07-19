@@ -94,8 +94,9 @@ def test_preprocess_nondeterministic():
     assert not torch.equal(processed1["supernode_idx"], processed2["supernode_idx"])
 
 
-def test_preprocess_deterministic():
-    sample = {"pos": torch.rand(10, 3), "index": 0}
+@pytest.mark.parametrize("sample_index", [0, torch.tensor(0)])
+def test_preprocess_deterministic(sample_index):
+    sample = {"pos": torch.rand(10, 3), "index": sample_index}
     precollator = SupernodeSamplingSampleProcessor(item="pos", num_supernodes=4, seed=0)
 
     processed1 = precollator(sample)
