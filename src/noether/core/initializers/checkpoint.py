@@ -1,6 +1,6 @@
 #  Copyright © 2025 Emmi AI GmbH. All rights reserved.
 
-from pathlib import Path
+from pathlib import Path, PosixPath
 from typing import Literal
 
 import torch
@@ -71,6 +71,11 @@ class CheckpointInitializer(InitializerBase):
     ) -> tuple[dict[str, Tensor], str, Path]:
         """Get the model state dict from the checkpoint.
 
+        Model checkpoints may contain ``pathlib.PosixPath`` metadata written
+        by trusted Noether training runs. The loader keeps PyTorch's restricted
+        ``weights_only`` mode and allowlists only that standard-library type
+        for the duration of this load.
+
         Args:
             model: the model to load the state dict into.
             model_name: the name of the model to load.
@@ -83,7 +88,8 @@ class CheckpointInitializer(InitializerBase):
         model_name, checkpoint_uri = self._get_modelname_and_checkpoint_uri(
             model=model, model_name=model_name, file_type="model"
         )
-        checkpoint = torch.load(checkpoint_uri, map_location=model.device, weights_only=True)
+        with torch.serialization.safe_globals([PosixPath]):
+            checkpoint = torch.load(checkpoint_uri, map_location=model.device, weights_only=True)
 
         if CheckpointKeys.STATE_DICT not in checkpoint:
             raise KeyError(f"Checkpoint at {checkpoint_uri} does not contain a state dict")

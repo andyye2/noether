@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,41 @@ from recipes.aero_cfd.scripts.run_drivaerml_transfer_strict import (
     require_frozen_protocol_for_execution,
     sha256_file,
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _implementation_git_state(repo_root: Path) -> tuple[str, bool]:
+    """Return the evaluator commit and whether its worktree is dirty.
+
+    Args:
+        repo_root: Git repository containing the evaluation implementation.
+
+    Returns:
+        The lowercase Git commit and a Boolean dirty-worktree indicator.
+    """
+    commit = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    status = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo_root),
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    if len(commit) != 40 or any(character not in "0123456789abcdef" for character in commit):
+        raise ValueError(f"invalid evaluator Git commit {commit!r}")
+    return commit, bool(status.strip())
 
 
 def _target_checkpoint(args: argparse.Namespace) -> Path:
@@ -160,6 +196,9 @@ def build_eval_config(args: argparse.Namespace) -> tuple[Any, dict[str, Any]]:
     """Build one official-split inference config bound to frozen artifacts."""
     if args.evaluation_split == "test" and not args.confirm_test_release:
         raise ValueError("test evaluation requires explicit --confirm-test-release")
+    evaluation_commit, evaluation_dirty = _implementation_git_state(REPO_ROOT)
+    if evaluation_dirty:
+        raise ValueError("frozen evaluation requires a clean implementation Git worktree")
     protocol_binding = load_protocol_binding(args.protocol)
     manifest_cell = load_manifest_cell(
         args.manifest,
@@ -251,6 +290,10 @@ def build_eval_config(args: argparse.Namespace) -> tuple[Any, dict[str, Any]]:
     )
     official_ids = getattr(DrivAerMLDefaultSplitIDs(), args.evaluation_split)
     audit = {
+        "evaluation_implementation_git_commit": evaluation_commit,
+        "evaluation_implementation_git_dirty": evaluation_dirty,
+        "training_implementation_git_commit": sidecar["implementation_git_commit"],
+        "training_implementation_git_dirty": sidecar["implementation_git_dirty"],
         "training_provenance_sidecar": str(sidecar_path.resolve()),
         "training_provenance_sidecar_sha256": sidecar_sha256,
         "target_checkpoint": str(target_checkpoint.resolve()),

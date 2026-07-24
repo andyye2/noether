@@ -234,6 +234,12 @@ How it works
    the model weights (no optimizer/scheduler state), then calls
    ``trainer.eval(model)`` instead of ``trainer.train(model)``.
 
+Model checkpoints are loaded with PyTorch's restricted ``weights_only`` mode.
+For compatibility with Noether checkpoints that record output locations,
+``pathlib.PosixPath`` metadata is allowlisted only during the model-checkpoint
+load. Other unapproved Python globals remain rejected; checkpoint loading does
+not fall back to unrestricted pickle deserialization.
+
 ``trainer.eval()`` simply iterates the configured callbacks against the
 restored weights — there is no separate eval loop, and nothing in the runner
 distinguishes "evaluation" from "inference". Whichever callbacks are

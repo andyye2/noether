@@ -1,9 +1,11 @@
 #  Copyright © 2025 Emmi AI GmbH. All rights reserved.
 
+import pickle
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+import torch
 import torch.nn as nn
 
 from noether.core.initializers.checkpoint import CheckpointInitializer
@@ -13,6 +15,7 @@ from noether.core.providers import PathProvider
 from noether.core.schemas.initializers import CheckpointInitializerConfig, ResumeInitializerConfig
 from noether.core.schemas.models.base import ModelBaseConfig
 from noether.core.schemas.optimizers import SGDOptimizerConfig
+from noether.core.types import CheckpointKeys
 from noether.core.utils.model import compute_model_norm
 from noether.core.utils.training.training_iteration import TrainingIteration
 
@@ -78,6 +81,37 @@ class DummyInitializer(CheckpointInitializer):
 
     def init_optimizer(self, model):
         pass
+
+
+class UnsafeCheckpointValue:
+    """A test-only global that must not be accepted by restricted loading."""
+
+
+def _write_model_checkpoint(
+    tmp_path: Path,
+    base_config_dict: dict,
+    dummy_model: DummyModel,
+    extra: object,
+) -> PathProvider:
+    """Write one temporary model checkpoint and return its path provider."""
+    path_provider = PathProvider(
+        output_root_path=tmp_path,
+        run_id=base_config_dict["run_id"],
+        stage_name=base_config_dict["stage_name"],
+        debug=False,
+    )
+    checkpoint_path = (
+        path_provider.checkpoint_path / f"dummy_model_ema_cp={base_config_dict['checkpoint_tag']}_model.th"
+    )
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            CheckpointKeys.STATE_DICT: dummy_model.state_dict(),
+            "extra": extra,
+        },
+        checkpoint_path,
+    )
+    return path_provider
 
 
 def test_checkpoint_initializer_init_with_string_checkpoint(base_config_dict, mock_path_provider):
@@ -165,6 +199,42 @@ def test_get_model_state_dict(base_config_dict, path_provider_with_stage_name, d
     dummy_model.load_state_dict(state_dict)
     norm_after_load = sum([p.norm() for p in dummy_model.state_dict().values()])
     assert pytest.approx(norm_after_load, 0.0001) == 2.4621
+
+
+def test_get_model_state_dict_allows_posix_path_metadata(tmp_path, base_config_dict, dummy_model):
+    """Trusted PosixPath metadata remains compatible with restricted loading."""
+    path_provider = _write_model_checkpoint(
+        tmp_path,
+        base_config_dict,
+        dummy_model,
+        Path("/trusted/training/output"),
+    )
+    initializer = DummyInitializer(
+        initializer_config=CheckpointInitializerConfig(**base_config_dict),
+        path_provider=path_provider,
+    )
+
+    state_dict, _, _ = initializer._get_model_state_dict(dummy_model)
+
+    assert state_dict.keys() == dummy_model.state_dict().keys()
+    assert all(torch.equal(state_dict[name], value) for name, value in dummy_model.state_dict().items())
+
+
+def test_get_model_state_dict_rejects_unapproved_checkpoint_global(tmp_path, base_config_dict, dummy_model):
+    """Restricted loading still rejects globals outside the narrow allowlist."""
+    path_provider = _write_model_checkpoint(
+        tmp_path,
+        base_config_dict,
+        dummy_model,
+        UnsafeCheckpointValue(),
+    )
+    initializer = DummyInitializer(
+        initializer_config=CheckpointInitializerConfig(**base_config_dict),
+        path_provider=path_provider,
+    )
+
+    with pytest.raises(pickle.UnpicklingError, match="Unsupported global"):
+        initializer._get_model_state_dict(dummy_model)
 
 
 def test_get_modelname_and_checkpoint_uri(base_config_dict, path_provider_with_stage_name, dummy_model):
