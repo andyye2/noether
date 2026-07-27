@@ -71,6 +71,8 @@ def _scratch_args(stats_path: Path, tmp_path: Path) -> argparse.Namespace:
         budget="compute_matched",
         smoke_updates=10,
         coordinate_frame="shapenet",
+        position_scale=1000.0,
+        supernode_radius=9.0,
         replicate=0,
         model_seed=7103,
         eval_point_seed=4242,

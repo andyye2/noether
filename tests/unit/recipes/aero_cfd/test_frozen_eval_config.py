@@ -100,6 +100,8 @@ def _eval_args(tmp_path: Path) -> argparse.Namespace:
         target_statistics=statistics,
         task="common",
         coordinate_frame="shapenet",
+        position_scale=1000.0,
+        supernode_radius=9.0,
         sample_size=25,
         method="S",
         replicate=0,

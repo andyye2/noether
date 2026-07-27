@@ -401,6 +401,8 @@ def write_training_provenance_sidecar(
         "replicate": audit["replicate"],
         "train_sample_size": args.sample_size,
         "coordinate_frame": audit["coordinate_frame"],
+        "position_scale": audit["position_scale"],
+        "supernode_radius": audit["supernode_radius"],
         "budget": args.budget,
         "subset_seed": audit["manifest"]["seed"],
         "model_seed": args.model_seed,
@@ -591,11 +593,13 @@ def build_experiment_config(
         coordinate_frame=args.coordinate_frame,
         expected_manifest_sha256=manifest_cell["raw_file_sha256"],
         expected_train_subset_size=args.sample_size,
+        position_scale=args.position_scale,
     )
 
     source_checkpoint = None
     source_checkpoint_sha256 = None
     model_params = dict(CHECKPOINT_ARCHITECTURE)
+    model_params["radius"] = args.supernode_radius
     if args.strategy != "scratch":
         source_checkpoint = source_checkpoint_path(args, protocol_binding)
         source_checkpoint_sha256 = protocol_binding["source_primary_sha256"]
@@ -641,10 +645,15 @@ def build_experiment_config(
         trainer_params["max_epochs"] = None
         trainer_params["max_updates"] = budget["max_updates"]
 
+    geometry_suffix = ""
+    if args.position_scale != 1000.0:
+        geometry_suffix += f"-ps{args.position_scale:g}"
+    if args.supernode_radius != CHECKPOINT_ARCHITECTURE["radius"]:
+        geometry_suffix += f"-sr{args.supernode_radius:g}"
     run_id = args.run_id or (
         f"mf-{task}-{args.strategy}-r{args.replicate}-n{args.sample_size}"
         f"-m{manifest_cell['payload_sha256'][:10]}-s{args.model_seed}"
-        f"-{args.coordinate_frame}-{args.budget}"
+        f"-{args.coordinate_frame}-{args.budget}{geometry_suffix}"
     )
     config = preset.build_config(
         model_kind=MODEL_KIND,
@@ -680,6 +689,8 @@ def build_experiment_config(
         "manifest": manifest_cell,
         "target_statistics": statistics_binding,
         "coordinate_frame": args.coordinate_frame,
+        "position_scale": args.position_scale,
+        "supernode_radius": args.supernode_radius,
         "source_checkpoint": str(source_checkpoint.resolve()) if source_checkpoint else None,
         "source_checkpoint_sha256": source_checkpoint_sha256,
         "model_seed": args.model_seed,
@@ -709,6 +720,27 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--budget", choices=BUDGETS, default="compute_matched")
     parser.add_argument("--smoke-updates", type=int, default=10)
     parser.add_argument("--coordinate-frame", choices=("native", "shapenet"), default="shapenet")
+    parser.add_argument(
+        "--position-scale",
+        type=float,
+        default=1000.0,
+        help=(
+            "Normalized position upper bound; positions map linearly to [0, scale]. "
+            "1000.0 is the frozen confirmatory value; exploratory source-matched "
+            "geometry rendering uses a larger value up to the RoPE max wavelength."
+        ),
+    )
+    parser.add_argument(
+        "--supernode-radius",
+        type=float,
+        default=float(CHECKPOINT_ARCHITECTURE["radius"]),
+        help=(
+            "Supernode-pooling radius in normalized position units. 9.0 is the frozen "
+            "confirmatory value; it must be rescaled together with --position-scale to "
+            "keep the physical message-passing neighborhood (and hence the graph degree) "
+            "comparable to the source pretraining."
+        ),
+    )
     parser.add_argument("--replicate", type=int, choices=range(8), required=True)
     parser.add_argument("--model-seed", type=int, required=True)
     parser.add_argument("--eval-point-seed", type=int, default=4242)
@@ -745,6 +777,10 @@ def parse_args() -> argparse.Namespace:
         parser.error("learning rates must be finite and positive")
     if not math.isfinite(args.weight_decay) or args.weight_decay < 0:
         parser.error("--weight-decay must be finite and non-negative")
+    if not math.isfinite(args.position_scale) or args.position_scale <= 0:
+        parser.error("--position-scale must be finite and positive")
+    if not math.isfinite(args.supernode_radius) or args.supernode_radius <= 0:
+        parser.error("--supernode-radius must be finite and positive")
     return args
 
 

@@ -94,6 +94,20 @@ The Muon LR was selected via a single-seed sweep over [0.001, 0.002, 0.005, 0.01
 
 See the [W&B report](https://wandb.ai/emmi-ai/optimizer-muon-ab-upt/reports/Muon-optimizer-AB-UPT--VmlldzoxNjU2OTgwMQ?accessToken=hqopdn0gmppyiv7l14zcvnoutjpm837alj1k6i6q97wtng5trzbl08y37djahojj) for training curves and additional metrics.
 
+## ShapeNet-Car → DrivAerML transfer: position scale
+
+The strict transfer runner (`scripts/run_drivaerml_transfer_strict.py`) and the frozen
+evaluator (`scripts/eval_drivaerml_transfer_frozen.py`) accept an exploratory
+`--position-scale` option (default `1000.0`, the frozen confirmatory value).
+Positions are normalized linearly to `[0, position_scale]` using the fixed
+`[-40, 80]` physical envelope. Because the ShapeNet-Car source pretraining renders
+cars at roughly 340–390 normalized units of length while the default DrivAerML
+mapping renders them at ~42 units, a larger scale (e.g. `8000`) re-aligns the car
+size — and therefore the RoPE phase statistics and the radius-9 supernode
+neighborhoods — with what the source checkpoint was trained on. The value is
+recorded in the training provenance sidecar and must match at evaluation time;
+sidecars written before this option exist are treated as `1000.0`.
+
 ## Documentation
 
 For a detailed walkthrough of this recipe covering configuration, datasets, pipeline, models, callbacks, and experiment execution, see the [full tutorial in the documentation](https://noether-docs.emmi.ai/html/tutorials/walkthrough/index.html).

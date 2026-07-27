@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -134,6 +135,17 @@ def _load_training_provenance(
                 f"training provenance mismatch for {key}: expected={expected_value!r}, actual={actual_value!r}"
             )
 
+    # Sidecars written before the exploratory geometry-rendering options have no
+    # "position_scale"/"supernode_radius" keys; they were all trained at the
+    # frozen defaults 1000.0 and 9.0.
+    for key, requested, legacy_default in (
+        ("position_scale", args.position_scale, 1000.0),
+        ("supernode_radius", args.supernode_radius, float(CHECKPOINT_ARCHITECTURE["radius"])),
+    ):
+        recorded = sidecar.get(key, legacy_default)
+        if isinstance(recorded, bool) or not isinstance(recorded, int | float) or float(recorded) != requested:
+            raise ValueError(f"training provenance mismatch for {key}: expected={requested!r}, actual={recorded!r}")
+
     strategy = sidecar.get("strategy")
     if METHOD_BY_STRATEGY.get(strategy) != sidecar.get("method"):
         raise ValueError(
@@ -225,9 +237,11 @@ def build_eval_config(args: argparse.Namespace) -> tuple[Any, dict[str, Any]]:
         coordinate_frame=args.coordinate_frame,
         expected_manifest_sha256=manifest_cell["raw_file_sha256"],
         expected_train_subset_size=args.sample_size,
+        position_scale=args.position_scale,
     )
 
     model_params = dict(CHECKPOINT_ARCHITECTURE)
+    model_params["radius"] = args.supernode_radius
     model_params["initializers"] = [
         PreviousRunInitializerConfig(
             output_path=args.target_output_path,
@@ -311,6 +325,8 @@ def build_eval_config(args: argparse.Namespace) -> tuple[Any, dict[str, Any]]:
         "replicate": sidecar["replicate"],
         "train_sample_size": sidecar["train_sample_size"],
         "coordinate_frame": sidecar["coordinate_frame"],
+        "position_scale": args.position_scale,
+        "supernode_radius": args.supernode_radius,
         "budget": sidecar["budget"],
         "model_seed": sidecar["model_seed"],
         "training_pipeline_seed": sidecar["training_pipeline_seed"],
@@ -344,6 +360,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target-statistics", type=Path, required=True)
     parser.add_argument("--task", choices=TASKS, required=True)
     parser.add_argument("--coordinate-frame", choices=("native", "shapenet"), default="shapenet")
+    parser.add_argument(
+        "--position-scale",
+        type=float,
+        default=1000.0,
+        help=(
+            "Normalized position upper bound used at training time; must equal the "
+            "value recorded in (or implied by) the training provenance sidecar."
+        ),
+    )
+    parser.add_argument(
+        "--supernode-radius",
+        type=float,
+        default=float(CHECKPOINT_ARCHITECTURE["radius"]),
+        help=(
+            "Supernode-pooling radius used at training time; must equal the value "
+            "recorded in (or implied by) the training provenance sidecar."
+        ),
+    )
     parser.add_argument("--sample-size", type=int, choices=(25, 50, 100, 200, 400), required=True)
     parser.add_argument("--method", required=True)
     parser.add_argument("--replicate", type=int, choices=range(8), required=True)
@@ -381,6 +415,10 @@ def parse_args() -> argparse.Namespace:
     ):
         if getattr(args, name) < 1:
             parser.error(f"--{name.replace('_', '-')} must be positive")
+    if not math.isfinite(args.position_scale) or args.position_scale <= 0:
+        parser.error("--position-scale must be finite and positive")
+    if not math.isfinite(args.supernode_radius) or args.supernode_radius <= 0:
+        parser.error("--supernode-radius must be finite and positive")
     return args
 
 

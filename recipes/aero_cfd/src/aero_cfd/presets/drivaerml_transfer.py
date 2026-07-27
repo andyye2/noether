@@ -29,6 +29,13 @@ _FIELD_COMPONENTS = {
     "volume_vorticity": 3,
 }
 
+#: RoPE/sincos maximum wavelength of the source-compatible AB-UPT architecture.
+#: Normalized positions span ``[0, position_scale]``; a scale above this bound
+#: would wrap the coarsest positional-encoding band, making distant points
+#: share an embedding. A scale equal to the bound spans exactly one period.
+_MAX_NORMALIZED_POSITION = 10000.0
+_DEFAULT_POSITION_SCALE = 1000.0
+
 
 def _read_mapping(path: Path) -> dict[str, Any]:
     """Read one JSON/YAML mapping without accepting ambiguous extensions."""
@@ -59,7 +66,22 @@ def _validate_numeric_stat(key: str, value: Any) -> list[float] | float:
 
 
 class _DrivAerMLTransferStatsMixin:
-    """Resolve concrete normalizers from one train-subset-only artifact."""
+    """Resolve concrete normalizers from one train-subset-only artifact.
+
+    Args:
+        statistics_artifact: Train-subset-only statistics artifact (JSON/YAML).
+        coordinate_frame: ``"native"`` or ``"shapenet"``; must match the artifact.
+        expected_manifest_sha256: Raw-file SHA256 of the frozen subset manifest.
+        expected_train_subset_size: Exact N recorded in the artifact.
+        position_scale: Upper bound of the normalized position range
+            ``[0, position_scale]``. Defaults to 1000.0 (the frozen
+            confirmatory value), which renders a DrivAerML car only ~39
+            normalized units long against a 10,000-unit coarsest positional
+            band. Exploratory runs may raise it so the car occupies a
+            source-like fraction of that band; it must not exceed the
+            architecture's RoPE/sincos maximum wavelength, beyond which
+            distant points would alias onto the same coarse embedding.
+    """
 
     coordinate_frame: Literal["native", "shapenet"]
 
@@ -70,6 +92,7 @@ class _DrivAerMLTransferStatsMixin:
         coordinate_frame: Literal["native", "shapenet"],
         expected_manifest_sha256: str,
         expected_train_subset_size: int,
+        position_scale: float = _DEFAULT_POSITION_SCALE,
     ) -> None:
         artifact = _read_mapping(statistics_artifact)
         if artifact.get("train_subset_size") != expected_train_subset_size:
@@ -97,10 +120,24 @@ class _DrivAerMLTransferStatsMixin:
         if not isinstance(stats, dict):
             raise ValueError("statistics artifact has no normalizer_stats mapping")
 
+        if (
+            isinstance(position_scale, bool)
+            or not isinstance(position_scale, int | float)
+            or not math.isfinite(position_scale)
+            or position_scale <= 0.0
+        ):
+            raise ValueError(f"position_scale must be finite and positive, got {position_scale!r}")
+        if position_scale > _MAX_NORMALIZED_POSITION:
+            raise ValueError(
+                f"position_scale must not exceed the RoPE/sincos maximum wavelength "
+                f"{_MAX_NORMALIZED_POSITION}, got {position_scale!r}"
+            )
+
         self.statistics_artifact = statistics_artifact.resolve()
         self.coordinate_frame = coordinate_frame
         self.expected_manifest_sha256 = expected_manifest_sha256
         self.expected_train_subset_size = expected_train_subset_size
+        self.position_scale = float(position_scale)
         self._transfer_stats = {key: _validate_numeric_stat(key, value) for key, value in stats.items()}
         self.build_normalizers()
 
@@ -124,7 +161,12 @@ class _DrivAerMLTransferStatsMixin:
         return values
 
     def build_normalizers(self) -> dict[str, list[Any]]:
-        """Build numeric configs so the dataset never falls back to full-train stats."""
+        """Build numeric configs so the dataset never falls back to full-train stats.
+
+        Position-strategy fields use ``self.position_scale`` as the normalized
+        upper bound instead of the declaration default, so one preset instance
+        renders geometry at exactly one audited scale.
+        """
         normalizers: dict[str, list[Any]] = {}
         for field, declaration in self.normalizer_spec.items():
             stat_keys = declaration.stat_keys or {}
@@ -169,7 +211,7 @@ class _DrivAerMLTransferStatsMixin:
                     PositionNormalizerConfig(
                         raw_pos_min=minimum,
                         raw_pos_max=maximum,
-                        scale=declaration.scale,
+                        scale=self.position_scale,
                         zero_center=declaration.zero_center,
                     )
                 ]
