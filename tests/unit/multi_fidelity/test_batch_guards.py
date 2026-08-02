@@ -1,104 +1,120 @@
 # Copyright © 2026 Emmi AI GmbH. All rights reserved.
 
-"""Tests for the request guards of the Slurm batch script.
-
-The batch script is the last thing between a generated command and a GPU, and
-its guards are the only protection for results that already exist. They are
-written to reject a bad request before touching the cluster environment, which
-also makes them testable off the cluster.
-"""
+"""Tests for the B2 submission boundary and command selection."""
 
 from __future__ import annotations
 
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 
 import pytest
 
+from research.multi_fidelity.tools import generate_training_commands
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
-BATCH_SCRIPT = REPO_ROOT / "research/multi_fidelity/slurm/drivaerml_paper_array.sbatch"
-COMMIT = "a" * 40
-OUTPUT_ROOT = f"/scratch/andyye2/ABUPT/outputs/multi_fidelity_paper/{COMMIT}/n100-r0-paper"
+SLURM_ROOT = REPO_ROOT / "research/multi_fidelity/slurm"
+STATISTICS_BATCH = SLURM_ROOT / "drivaerml_statistics_array.sbatch"
+TRAINING_BATCH = SLURM_ROOT / "drivaerml_training_array.sbatch"
+RETIRED_BATCH = SLURM_ROOT / "drivaerml_paper_array.sbatch"
+REMOTE_ROOT = Path("/scratch/andyye2/ABUPT/multi_fidelity_B2")
+DATASET_ROOT = Path("/scratch/andyye2/data/drivaerml_subsampled_10x")
 
 pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="bash is unavailable")
 
 
-def _run(*arguments: str, task_id: str = "1") -> subprocess.CompletedProcess[str]:
-    """Run the batch script with one array index and capture its report."""
-    return subprocess.run(
-        ["bash", str(BATCH_SCRIPT), *arguments],
-        env={"PATH": "/usr/bin:/bin", "SLURM_ARRAY_TASK_ID": task_id},
-        capture_output=True,
-        text=True,
-        check=False,
+@pytest.mark.parametrize("batch", [STATISTICS_BATCH, TRAINING_BATCH, RETIRED_BATCH])
+def test_batch_scripts_are_valid_bash(batch: Path) -> None:
+    """A syntax error must be caught before a Slurm submission."""
+    assert subprocess.run(["bash", "-n", str(batch)], check=False).returncode == 0
+
+
+def test_batches_are_bound_to_the_parallel_b2_layout() -> None:
+    """Code and logs must never fall back to the prior experiment tree."""
+    for batch in (STATISTICS_BATCH, TRAINING_BATCH):
+        text = batch.read_text(encoding="utf-8")
+        assert "PROJECT_ROOT=/scratch/andyye2/ABUPT/multi_fidelity_B2" in text
+        assert "#SBATCH --output=/scratch/andyye2/ABUPT/slurm/multi_fidelity_B2/" in text
+        assert "#SBATCH --error=/scratch/andyye2/ABUPT/slurm/multi_fidelity_B2/" in text
+
+
+def test_training_batch_freezes_the_two_matched_arms() -> None:
+    """The production array accepts only the shared matched geometry cell."""
+    text = TRAINING_BATCH.read_text(encoding="utf-8")
+    for required in (
+        "command_count -ne 2",
+        "--strategy scratch",
+        "--strategy finetune",
+        "--sample-size 100",
+        "--budget compute_matched",
+        "--position-scale 1000",
+        "--supernode-radius 0.1",
+        "--replicate 0",
+        "--model-seed 7103",
+    ):
+        assert required in text
+
+
+def test_training_generator_rejects_duplicate_arms(tmp_path: Path) -> None:
+    """Duplicate arm names would make two array tasks overwrite one run ID."""
+    with pytest.raises(ValueError, match="must not contain duplicates"):
+        generate_training_commands.main(
+            [
+                "--repo-root",
+                str(REMOTE_ROOT),
+                "--protocol",
+                str(REPO_ROOT / "research/multi_fidelity/experiment_protocol.yaml"),
+                "--manifest-root",
+                str(tmp_path / "manifests"),
+                "--stats-root",
+                str(tmp_path / "statistics"),
+                "--dataset-root",
+                str(DATASET_ROOT),
+                "--output-path",
+                "/scratch/andyye2/ABUPT/outputs/multi_fidelity_B2/a",
+                "--source-output-path",
+                "/scratch/andyye2/ABUPT/outputs",
+                "--output",
+                str(tmp_path / "commands.txt"),
+                "--allow-missing-stats",
+                "--arms",
+                "S-matched",
+                "S-matched",
+            ]
+        )
+
+
+def test_generator_emits_only_the_selected_matched_pair(tmp_path: Path) -> None:
+    """The requested two-arm command file contains one scratch and one transfer run."""
+    output = tmp_path / "commands.txt"
+    generate_training_commands.main(
+        [
+            "--repo-root",
+            str(REMOTE_ROOT),
+            "--protocol",
+            str(REPO_ROOT / "research/multi_fidelity/experiment_protocol.yaml"),
+            "--manifest-root",
+            str(tmp_path / "manifests"),
+            "--stats-root",
+            str(tmp_path / "statistics"),
+            "--dataset-root",
+            str(DATASET_ROOT),
+            "--output-path",
+            "/scratch/andyye2/ABUPT/outputs/multi_fidelity_B2/a",
+            "--source-output-path",
+            "/scratch/andyye2/ABUPT/outputs",
+            "--output",
+            str(output),
+            "--allow-missing-stats",
+            "--arms",
+            "S-matched",
+            "P-FT-matched",
+        ]
     )
-
-
-def _command_file(tmp_path: Path, *commands: str) -> str:
-    """Write a command file and return its path."""
-    path = tmp_path / "commands.txt"
-    path.write_text("\n".join(commands) + "\n", encoding="utf-8")
-    return str(path)
-
-
-def test_script_is_valid_bash() -> None:
-    """A syntax error would only surface hours later inside the queue."""
-    assert subprocess.run(["bash", "-n", str(BATCH_SCRIPT)], check=False).returncode == 0
-
-
-def test_a_partial_commit_is_rejected(tmp_path: Path) -> None:
-    """An abbreviated commit cannot identify an implementation state."""
-    result = _run("deadbeef", _command_file(tmp_path, f"echo --output-path {OUTPUT_ROOT}"))
-    assert result.returncode == 2
-    assert "expected a full lowercase commit hash" in result.stderr
-
-
-def test_an_out_of_range_array_index_is_rejected(tmp_path: Path) -> None:
-    """A wider array than the command file would run nothing, silently."""
-    result = _run(COMMIT, _command_file(tmp_path, f"echo --output-path {OUTPUT_ROOT}"), task_id="7")
-    assert result.returncode == 2
-    assert "array index 7 is outside 1..1" in result.stderr
-
-
-def test_a_command_for_another_commit_is_rejected(tmp_path: Path) -> None:
-    """Replaying an old command file must not land in this run's namespace."""
-    stale = "/scratch/andyye2/ABUPT/outputs/multi_fidelity_paper/0000/n100-r0-paper"
-    result = _run(COMMIT, _command_file(tmp_path, f"echo --output-path {stale}"))
-    assert result.returncode == 2
-    assert "does not write into the namespace" in result.stderr
-
-
-@pytest.mark.parametrize(
-    "protected",
-    [
-        "/scratch/andyye2/ABUPT/outputs/multi_fidelity/",
-        "/scratch/andyye2/ABUPT/outputs/multi_fidelity_exploratory/",
-        "/scratch/andyye2/ABUPT/multi_fidelity_artifacts/cf974078ea633f1fb6ff2178de7fa56ac60c89d5/",
-        "/scratch/andyye2/ABUPT/multi_fidelity_stats/",
-    ],
-)
-def test_completed_result_namespaces_are_untouchable(tmp_path: Path, protected: str) -> None:
-    """No command may even name a namespace that already holds results."""
-    result = _run(COMMIT, _command_file(tmp_path, f"echo {protected}x/{COMMIT}/y"))
-    assert result.returncode == 2
-    assert "completed-result namespace" in result.stderr
-
-
-def test_the_test_split_is_never_released_by_this_batch(tmp_path: Path) -> None:
-    """Held-out data needs a separate, explicit decision.
-
-    The evaluator and the command generator both refuse it too; this is the
-    third gate, on the machine that would actually read the files.
-    """
-    command = f"echo --output-path {OUTPUT_ROOT} --evaluation-split test"
-    result = _run(COMMIT, _command_file(tmp_path, command))
-    assert result.returncode == 2
-    assert "never releases the held-out test split" in result.stderr
-
-
-def test_a_valid_request_reaches_the_environment_check(tmp_path: Path) -> None:
-    """A well-formed request is only stopped by the cluster being absent."""
-    result = _run(COMMIT, _command_file(tmp_path, f"echo --output-path {OUTPUT_ROOT}"))
-    assert result.returncode == 2
-    assert "required file missing" in result.stderr
+    lines = output.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2
+    tokens = [shlex.split(line) for line in lines]
+    assert [line[line.index("--strategy") + 1] for line in tokens] == ["scratch", "finetune"]
+    assert all(line[line.index("--supernode-radius") + 1] == "0.1" for line in tokens)
+    assert all(line[line.index("--position-scale") + 1] == "1000" for line in tokens)

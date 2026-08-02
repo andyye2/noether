@@ -6,13 +6,14 @@ Example:
 
     .. code-block:: bash
 
-        uv run python -m research.multi_fidelity.tools.generate_training_commands \\
-            --repo-root /scratch/andyye2/ABUPT/multi_fidelity \\
-            --dataset-root /scratch/andyye2/data/drivaerml_subsampled_10x \\
-            --manifest-root  <artifacts>/manifests \\
-            --stats-root     <artifacts>/statistics \\
-            --output-path    <outputs>/n100-r0-paper \\
-            --source-output-path /scratch/andyye2/ABUPT/outputs \\
+        uv run python -m research.multi_fidelity.tools.generate_training_commands \
+            --repo-root /scratch/andyye2/ABUPT/multi_fidelity_B2 \
+            --dataset-root /scratch/andyye2/data/drivaerml_subsampled_10x \
+            --manifest-root <artifacts>/manifests \
+            --stats-root <artifacts>/statistics \
+            --output-path <outputs> \
+            --source-output-path /scratch/andyye2/ABUPT/outputs \
+            --arms S-matched P-FT-matched \
             --output <artifacts>/commands/training.txt
 """
 
@@ -108,6 +109,7 @@ def main(argv: list[str] | None = None) -> None:
 
     Raises:
         FileNotFoundError: If a required statistics artifact is missing.
+        ValueError: If an arm is requested more than once.
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-root", type=Path, required=True)
@@ -124,18 +126,16 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     repo_root = args.repo_root.resolve()
-    # The embedded path must be valid on the executing host; the seeds are read
-    # from this checkout, which the runner re-validates against the protocol.
-    protocol_path = args.protocol or repo_root / PROTOCOL_RELATIVE_PATH
-    cell = PaperCell.from_protocol(
-        load_protocol_binding(REPO_ROOT / PROTOCOL_RELATIVE_PATH),
-        budget=args.budget,
-    )
+    protocol_path = (args.protocol or repo_root / PROTOCOL_RELATIVE_PATH).resolve()
+    binding_path = args.protocol.resolve() if args.protocol else REPO_ROOT / PROTOCOL_RELATIVE_PATH
+    cell = PaperCell.from_protocol(load_protocol_binding(binding_path), budget=args.budget)
     statistics = (
-        args.stats_root / f"seed{cell.subset_seed}" / (f"n{cell.sample_size}_{cell.task}_{cell.coordinate_frame}.json")
+        args.stats_root / f"seed{cell.subset_seed}" / f"n{cell.sample_size}_{cell.task}_{cell.coordinate_frame}.json"
     )
     if not args.allow_missing_stats and not statistics.is_file():
         raise FileNotFoundError(f"statistics artifact is missing: {statistics}")
+    if len(set(args.arms)) != len(args.arms):
+        raise ValueError(f"--arms must not contain duplicates, got {args.arms}")
 
     ordered = [arm_by_name(name) for name in args.arms] if args.arms != list(ARM_NAMES) else list(ARMS)
     write_command_file(

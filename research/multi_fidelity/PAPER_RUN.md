@@ -1,3 +1,10 @@
+> **Operational notice (NCSA B2):** the approved deployment runs only
+> `S-matched` and `P-FT-matched` in isolated `*_B2` namespaces. Follow
+> [`B2_MATCHED_RUN.md`](B2_MATCHED_RUN.md) and its separate CPU/GPU batch
+> scripts. The generic `drivaerml_paper_array.sbatch` entry point is retired;
+> the four-arm sequence below is retained as the design record, not a runnable
+> submission recipe for this deployment.
+
 # Reported run: regenerating every number from a clean slate
 
 This is the operational contract for the results this implementation reports.

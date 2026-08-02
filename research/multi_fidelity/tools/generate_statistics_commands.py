@@ -2,20 +2,9 @@
 
 """Generate the train-only statistics command for the reported cell.
 
-All reported arms share one data cell, so they share exactly one normalizer
-statistics artifact.  Fitting it once and hashing it into every run is what
-makes the arms comparable.
-
-Example:
-
-    .. code-block:: bash
-
-        uv run python -m research.multi_fidelity.tools.generate_statistics_commands \\
-            --repo-root /scratch/andyye2/ABUPT/multi_fidelity \\
-            --dataset-root /scratch/andyye2/data/drivaerml_subsampled_10x \\
-            --manifest-root <artifacts>/manifests \\
-            --stats-root    <artifacts>/statistics \\
-            --output        <artifacts>/commands/statistics.txt
+All selected arms share one data cell, so they share exactly one normalizer
+statistics artifact. Fitting it once and hashing it into every run makes the
+arms comparable.
 """
 
 from __future__ import annotations
@@ -104,13 +93,16 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     repo_root = args.repo_root.resolve()
+    protocol_path = (args.protocol or repo_root / PROTOCOL_RELATIVE_PATH).resolve()
+    binding_path = args.protocol.resolve() if args.protocol else REPO_ROOT / PROTOCOL_RELATIVE_PATH
+    cell = PaperCell.from_protocol(load_protocol_binding(binding_path))
     write_command_file(
         args.output,
         [
             command_for_cell(
-                PaperCell.from_protocol(load_protocol_binding(REPO_ROOT / PROTOCOL_RELATIVE_PATH)),
+                cell,
                 repo_root=repo_root,
-                protocol_path=args.protocol or repo_root / PROTOCOL_RELATIVE_PATH,
+                protocol_path=protocol_path,
                 manifest_root=args.manifest_root,
                 stats_root=args.stats_root,
                 dataset_root=args.dataset_root,
