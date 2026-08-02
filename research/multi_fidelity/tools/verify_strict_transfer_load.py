@@ -5,13 +5,13 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 from typing import Any, Literal, cast
 
 import torch
 
+from aero_cfd.multi_fidelity.integrity import sha256_file
 from aero_cfd.presets.drivaerml import DrivAerMLPreset
 from aero_cfd.presets.drivaerml_common import DrivAerMLCommonFieldsPreset
 from noether.modeling.models.aerodynamics import AeroABUPT
@@ -38,15 +38,6 @@ CHECKPOINT_ARCHITECTURE: dict[str, Any] = {
     "mlp_expansion_factor": 4,
     "radius": 9,
 }
-
-
-def _sha256(path: Path) -> str:
-    """Hash one checkpoint file in bounded chunks."""
-    digest = hashlib.sha256()
-    with path.open("rb") as file:
-        while chunk := file.read(4 * 1024 * 1024):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def verify_load(checkpoint_path: Path, task: Literal["common", "full"]) -> dict[str, Any]:
@@ -79,7 +70,7 @@ def verify_load(checkpoint_path: Path, task: Literal["common", "full"]) -> dict[
     )
     return {
         "checkpoint": str(checkpoint_path.resolve()),
-        "checkpoint_sha256": _sha256(checkpoint_path),
+        "checkpoint_sha256": sha256_file(checkpoint_path),
         "task": task,
         "strict_load_succeeded": True,
         "missing_keys": incompatible.missing_keys,
@@ -106,7 +97,7 @@ def main() -> None:
     args = parser.parse_args()
 
     tasks: tuple[Literal["common", "full"], ...] = (
-        ("common", "full") if args.task == "both" else (cast(Literal["common", "full"], args.task),)
+        ("common", "full") if args.task == "both" else (cast("Literal['common', 'full']", args.task),)
     )
     report = {task: verify_load(args.checkpoint, task) for task in tasks}
     rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"

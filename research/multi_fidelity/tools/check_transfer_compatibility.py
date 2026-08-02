@@ -133,7 +133,7 @@ def main() -> None:
     args = parser.parse_args()
 
     tasks: list[Literal["common", "full"]] = (
-        ["common", "full"] if args.task == "both" else [cast(Literal["common", "full"], args.task)]
+        ["common", "full"] if args.task == "both" else [cast("Literal['common', 'full']", args.task)]
     )
     report = {task: compatibility_report(args.checkpoint, task) for task in tasks}
     rendered = json.dumps(report, indent=2, sort_keys=True)

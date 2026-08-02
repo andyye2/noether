@@ -25,17 +25,6 @@
 
 set -euo pipefail
 
-if ! type module >/dev/null 2>&1; then
-    if [[ -f /etc/profile.d/modules.sh ]]; then
-        source /etc/profile.d/modules.sh
-    elif [[ -f /usr/share/lmod/lmod/init/bash ]]; then
-        source /usr/share/lmod/lmod/init/bash
-    fi
-fi
-
-module purge || true
-module load anaconda3/2024.10 || module load anaconda3
-
 PROJECT_ROOT=/scratch/andyye2/ABUPT/multi_fidelity
 ENV_ROOT=/scratch/andyye2/ABUPT/shapenet-divu0/5-14-restored/.venv
 DATA_ROOT=/scratch/andyye2/data/drivaerml_subsampled_10x
@@ -48,11 +37,15 @@ PROTOCOL="$PROJECT_ROOT/research/multi_fidelity/experiment_protocol.yaml"
 EXPECTED_CHECKPOINT_SIZE=28147342
 EXPECTED_CHECKPOINT_SHA=261a46b7464d50c26301db60758feaabc27ce3d4f30b511e826201d32154fe38
 
-# Namespaces holding completed results. Nothing here may ever write into them.
+# Namespaces holding completed results. A command may not so much as name one.
+# The artifacts root itself is not listed because this run writes its own
+# manifests, statistics, and metrics under its own commit inside it; the two
+# commits that already own results there are listed individually.
 PROTECTED_ROOTS=(
     /scratch/andyye2/ABUPT/outputs/multi_fidelity/
     /scratch/andyye2/ABUPT/outputs/multi_fidelity_exploratory/
-    /scratch/andyye2/ABUPT/multi_fidelity_artifacts/
+    /scratch/andyye2/ABUPT/multi_fidelity_artifacts/cf974078ea633f1fb6ff2178de7fa56ac60c89d5/
+    /scratch/andyye2/ABUPT/multi_fidelity_artifacts/2ec68b91d5bd7573e464098eecf176e65f97f8e1/
     /scratch/andyye2/ABUPT/multi_fidelity_stats/
 )
 
@@ -84,6 +77,51 @@ command_count=$(wc -l < "$COMMAND_FILE")
 if [[ $SLURM_ARRAY_TASK_ID -lt 1 || $SLURM_ARRAY_TASK_ID -gt $command_count ]]; then
     echo "STOP: array index $SLURM_ARRAY_TASK_ID is outside 1..$command_count" >&2
     exit 2
+fi
+
+command_line=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "$COMMAND_FILE")
+
+if [[ -z "$command_line" ]]; then
+    echo "STOP: no command at array index $SLURM_ARRAY_TASK_ID" >&2
+    exit 2
+fi
+
+# The command must name this commit's output namespace, so a rerun of an older
+# command file can never land on top of results from another implementation.
+if [[ "$command_line" != *"/$COMMIT/"* ]]; then
+    echo "STOP: command does not write into the namespace of $COMMIT" >&2
+    echo "$command_line" >&2
+    exit 2
+fi
+
+for protected in "${PROTECTED_ROOTS[@]}"; do
+    if [[ "$command_line" == *"$protected"* ]]; then
+        echo "STOP: command references a completed-result namespace: $protected" >&2
+        echo "$command_line" >&2
+        exit 2
+    fi
+done
+
+if [[ "$command_line" == *"--evaluation-split test"* ]]; then
+    echo "STOP: this batch never releases the held-out test split" >&2
+    exit 2
+fi
+
+# Everything above validates the request itself and must work on any machine.
+# Only now bring up the cluster environment.
+if ! type module >/dev/null 2>&1; then
+    if [[ -f /etc/profile.d/modules.sh ]]; then
+        source /etc/profile.d/modules.sh
+    elif [[ -f /usr/share/lmod/lmod/init/bash ]]; then
+        source /usr/share/lmod/lmod/init/bash
+    fi
+fi
+
+if type module >/dev/null 2>&1; then
+    module purge || true
+    module load anaconda3/2024.10 || module load anaconda3
+else
+    echo "note: no module system found; using the environment as inherited" >&2
 fi
 
 for required_path in "$ENV_ROOT/bin/python" "$SOURCE_CKPT" "$PROTOCOL"; do
@@ -127,34 +165,6 @@ fi
 
 if ! grep -q '^status: frozen_before_first_target_job$' "$PROTOCOL"; then
     echo "STOP: experiment protocol is not frozen" >&2
-    exit 2
-fi
-
-command_line=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "$COMMAND_FILE")
-
-if [[ -z "$command_line" ]]; then
-    echo "STOP: no command at array index $SLURM_ARRAY_TASK_ID" >&2
-    exit 2
-fi
-
-# The command must name this commit's output namespace, so a rerun of an older
-# command file can never land on top of results from another implementation.
-if [[ "$command_line" != *"/$COMMIT/"* ]]; then
-    echo "STOP: command does not write into the namespace of $COMMIT" >&2
-    echo "$command_line" >&2
-    exit 2
-fi
-
-for protected in "${PROTECTED_ROOTS[@]}"; do
-    if [[ "$command_line" == *"--output-path $protected"* ]] ||
-       [[ "$command_line" == *"--eval-output-path $protected"* ]]; then
-        echo "STOP: command would write into a completed-result namespace: $protected" >&2
-        exit 2
-    fi
-done
-
-if [[ "$command_line" == *"--evaluation-split test"* ]]; then
-    echo "STOP: this batch never releases the held-out test split" >&2
     exit 2
 fi
 

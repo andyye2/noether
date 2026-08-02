@@ -136,6 +136,12 @@ Every step runs through `uv run --no-sync` with
   the degree distribution of the arm's geometry graph.
 * `sbatch --test-only` for every array before the real submission.
 
+Steps 1, 3, and the dry runs need no dataset and no cluster, so the chain can be
+rehearsed locally before anything is uploaded: materialize the manifests into a
+scratch directory, generate the command list against it, and run each generated
+command with `--dry-run` appended. The batch script's request guards are covered
+by `tests/unit/multi_fidelity/test_batch_guards.py` and also run off-cluster.
+
 ## Where the frozen protocol and reality differ
 
 `research/multi_fidelity/experiment_protocol.yaml` is a preregistration and is
