@@ -4,6 +4,12 @@
 日期：2026-07-18
 状态：首个目标任务前已冻结（`frozen_before_first_target_job`）
 
+> **历史文档。** 本文是 2026-07-18 冻结时的证据审计，其中"P0/P1 尚未运行"等表述已被后续
+> 真实运行取代（实际状态以 NCSA provenance、metrics 与 Slurm 记录为准）。文中引用的
+> `tools/materialize_study_manifests.py`、`tools/assess_validation_gate.py`、
+> `tools/analyze_transfer_results.py`、`evidence/manifests/`、`evidence/commands/`
+> 已被替换或删除。当前实现要报告的那一版实验定义见 [`PAPER_RUN.md`](PAPER_RUN.md)。
+
 ## 执行结论
 
 **当前结论不是“已经证明能迁移”，也不是“技术上已完成端到端迁移”，而是：checkpoint 与目标侧源兼容架构具有很高的张量形状兼容性，严格初始化和 train+val 配置构造链已经验证；真实 DrivAerML P0/P1 尚未运行，实际优化稳定性、预测质量和样本效率都仍待证。**

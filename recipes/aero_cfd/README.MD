@@ -94,19 +94,30 @@ The Muon LR was selected via a single-seed sweep over [0.001, 0.002, 0.005, 0.01
 
 See the [W&B report](https://wandb.ai/emmi-ai/optimizer-muon-ab-upt/reports/Muon-optimizer-AB-UPT--VmlldzoxNjU2OTgwMQ?accessToken=hqopdn0gmppyiv7l14zcvnoutjpm837alj1k6i6q97wtng5trzbl08y37djahojj) for training curves and additional metrics.
 
-## ShapeNet-Car → DrivAerML transfer: position scale
+## ShapeNet-Car → DrivAerML transfer: geometry rendering
 
 The strict transfer runner (`scripts/run_drivaerml_transfer_strict.py`) and the frozen
-evaluator (`scripts/eval_drivaerml_transfer_frozen.py`) accept an exploratory
-`--position-scale` option (default `1000.0`, the frozen confirmatory value).
-Positions are normalized linearly to `[0, position_scale]` using the fixed
-`[-40, 80]` physical envelope. Because the ShapeNet-Car source pretraining renders
-cars at roughly 340–390 normalized units of length while the default DrivAerML
-mapping renders them at ~42 units, a larger scale (e.g. `8000`) re-aligns the car
-size — and therefore the RoPE phase statistics and the radius-9 supernode
-neighborhoods — with what the source checkpoint was trained on. The value is
-recorded in the training provenance sidecar and must match at evaluation time;
-sidecars written before this option exist are treated as `1000.0`.
+evaluator (`scripts/eval_drivaerml_transfer_frozen.py`) expose the two options that
+decide how raw metres become the coordinates the model sees: `--position-scale` and
+`--supernode-radius`. Positions are normalized linearly onto `[0, position_scale]`
+using the fixed `[-40, 80]` physical envelope, and the radius is expressed in those
+same normalized units.
+
+`--position-scale` stays at the pretrained `1000.0` for any run that restores the
+source checkpoint, and the runner refuses anything else: the sincos and RoPE
+frequency buffers are restored from the checkpoint, so a rescaled position range
+would evaluate frozen frequency bands at shifted phases. A DrivAerML car therefore
+spans about 39 of the 1000 normalized units, against roughly 500–690 for a
+ShapeNet-Car sample.
+
+The consequence is that the source radius of `9.0` no longer describes a comparable
+neighbourhood: it reaches about a quarter of the target car, and every supernode
+saturates the degree cap of 32, so the geometry graph stops carrying shape.
+Rescaling the radius to `0.1` restores the pretraining message-graph density
+(mean degree 5.31 against a source mean near 5.8). Both values are recorded in the
+training provenance sidecar, in every exported metric row, and in the run ID, and
+the evaluator refuses to score a checkpoint under a rendering it was not trained
+with. See `research/multi_fidelity/PAPER_RUN.md` for the reported comparison.
 
 ## Documentation
 

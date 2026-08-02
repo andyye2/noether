@@ -2,6 +2,13 @@
 
 Status: `frozen_before_first_target_job`.
 
+> **Preregistration, not a description of this implementation.** It describes
+> the full acquisition study (P0–P3, five sample sizes, eight replicates). The
+> reported run is one paired cell and is defined by [`PAPER_RUN.md`](PAPER_RUN.md);
+> the AULC, sample-efficiency, sign-flip, bootstrap, and futility-gate tooling
+> this document refers to is not part of the current implementation. The YAML
+> is kept byte-identical so its SHA256 still binds the manifests and statistics.
+
 This document is the human-readable companion to `experiment_protocol.yaml`.
 The YAML raw-file SHA256 is the study integrity anchor, not a complete runtime
 source of truth. The strict runner parses and enforces only selected protocol

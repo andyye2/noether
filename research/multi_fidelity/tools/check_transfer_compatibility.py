@@ -11,7 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import torch
 
@@ -132,7 +132,9 @@ def main() -> None:
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
 
-    tasks = ["common", "full"] if args.task == "both" else [args.task]
+    tasks: list[Literal["common", "full"]] = (
+        ["common", "full"] if args.task == "both" else [cast(Literal["common", "full"], args.task)]
+    )
     report = {task: compatibility_report(args.checkpoint, task) for task in tasks}
     rendered = json.dumps(report, indent=2, sort_keys=True)
     if args.output is None:

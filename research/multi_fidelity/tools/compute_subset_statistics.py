@@ -22,12 +22,12 @@ import torch
 import yaml
 
 from aero_cfd.datasets.transfer_drivaerml import transform_loaded_drivaerml_field
+from aero_cfd.multi_fidelity.manifest import verify_manifest
+from aero_cfd.multi_fidelity.protocol import FROZEN_PROTOCOL_STATUS
 from noether.data.datasets.cfd.caeml.drivaerml.split import DrivAerMLDefaultSplitIDs
 from noether.data.stats import RunningMoments
-from research.multi_fidelity.tools.materialize_nested_manifests import verify_manifest
 
 CoordinateFrame = Literal["native", "shapenet"]
-FROZEN_PROTOCOL_STATUS = "frozen_before_first_target_job"
 
 
 @dataclass(frozen=True)
@@ -170,7 +170,7 @@ def load_frozen_train_subset(manifest_path: Path, n: int) -> tuple[list[int], di
 
     Args:
         manifest_path: Frozen split manifest produced by
-            ``build_nested_splits.py``.
+            ``materialize_manifests.py``.
         n: Requested training-subset size.
 
     Returns:

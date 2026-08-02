@@ -1,199 +1,154 @@
 # Copyright © 2026 Emmi AI GmbH. All rights reserved.
 
-"""Generate preregistered strict-training command lists by release phase."""
+"""Generate the strict-training command list for the reported arms.
+
+Example:
+
+    .. code-block:: bash
+
+        uv run python -m research.multi_fidelity.tools.generate_training_commands \\
+            --repo-root /scratch/andyye2/ABUPT/multi_fidelity \\
+            --dataset-root /scratch/andyye2/data/drivaerml_subsampled_10x \\
+            --manifest-root  <artifacts>/manifests \\
+            --stats-root     <artifacts>/statistics \\
+            --output-path    <outputs>/n100-r0-paper \\
+            --source-output-path /scratch/andyye2/ABUPT/outputs \\
+            --output <artifacts>/commands/training.txt
+"""
 
 from __future__ import annotations
 
 import argparse
-import shlex
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
-import yaml
+from aero_cfd.multi_fidelity.experiment import BUDGETS
 
-Phase = Literal["P0", "P1", "P2", "P2a", "P2b", "P2c", "P3"]
-DEFAULT_MANIFEST_RELATIVE_ROOT = Path("research/multi_fidelity/evidence/manifests")
-
-
-@dataclass(frozen=True)
-class Cell:
-    """One train/validation experiment cell."""
-
-    replicate: int
-    subset_seed: int
-    model_seed: int
-    n: int
-    task: str
-    strategy: str
-    budget: str
-    frame: str = "shapenet"
+from .commands import TRAINING_SCRIPT, uv_command, write_command_file
+from .paper_arms import ARM_NAMES, ARMS, Arm, PaperCell, arm_by_name
 
 
-def _protocol_replicates(protocol: dict) -> list[dict[str, int]]:
-    """Read and validate the preregistered seed table."""
-    entries = protocol["data"]["paired_replicates"]
-    if len(entries) != 8:
-        raise ValueError(f"protocol must define exactly eight paired replicates, got {len(entries)}")
-    for expected, entry in enumerate(entries):
-        if entry["replicate"] != expected:
-            raise ValueError("replicate IDs must be consecutive and ordered from zero")
-    return entries
-
-
-def phase_cells(protocol: dict, phase: Phase) -> list[Cell]:
-    """Expand one staged-release phase into exact cells."""
-    reps = _protocol_replicates(protocol)
-    sizes = protocol["data"].get("train_sample_sizes")
-    expected_sizes = [25, 50, 100, 200, 400]
-    if sizes != expected_sizes:
-        raise ValueError(f"protocol train_sample_sizes must be {expected_sizes}, got {sizes}")
-    cells: list[Cell] = []
-
-    def add(rep_indices, ns, task, strategies, budget, frame="shapenet"):
-        for rep_index in rep_indices:
-            rep = reps[rep_index]
-            for n in ns:
-                for strategy in strategies:
-                    cells.append(
-                        Cell(
-                            replicate=rep_index,
-                            subset_seed=rep["subset_seed"],
-                            model_seed=rep["model_seed"],
-                            n=n,
-                            task=task,
-                            strategy=strategy,
-                            budget=budget,
-                            frame=frame,
-                        )
-                    )
-
-    if phase == "P0":
-        add([0], [25], "common", ["scratch", "finetune", "linear_probe", "gradual_unfreeze"], "smoke")
-        add([0], [25], "full", ["scratch", "finetune"], "smoke")
-    elif phase == "P1":
-        add(range(3), sizes, "common", ["scratch", "finetune"], "compute_matched")
-    elif phase == "P2":
-        add(range(3, 8), sizes, "common", ["scratch", "finetune"], "compute_matched")
-    elif phase == "P2a":
-        add(range(3), sizes, "common", ["scratch", "finetune"], "fixed_epoch")
-    elif phase == "P2b":
-        add(range(3), [50, 100], "common", ["linear_probe", "gradual_unfreeze"], "compute_matched")
-    elif phase == "P2c":
-        add(range(3), [50, 100], "common", ["scratch", "finetune"], "compute_matched", "native")
-    elif phase == "P3":
-        add(range(5), [50, 100, 200, 400], "full", ["scratch", "finetune"], "compute_matched")
-    else:
-        raise ValueError(f"unsupported phase {phase}")
-    return cells
-
-
-def command_for_cell(
-    cell: Cell,
+def command_for_arm(
+    arm: Arm,
+    cell: PaperCell,
     *,
     repo_root: Path,
-    manifest_root: Path,
     protocol_path: Path,
+    manifest_root: Path,
+    stats_root: Path,
     dataset_root: Path,
     output_path: Path,
-    stats_root: Path,
     source_output_path: Path,
 ) -> str:
-    """Render one shell-safe command line."""
+    """Render the training command line of one arm.
+
+    Args:
+        arm: Reported arm.
+        cell: The shared paired data cell.
+        repo_root: Repository root on the executing host.
+        protocol_path: Path of the frozen preregistration.
+        manifest_root: Directory holding the materialized manifests.
+        stats_root: Directory holding the train-subset statistics.
+        dataset_root: Root of the DrivAerML dataset.
+        output_path: Root the runs write into.
+        source_output_path: Root of the ShapeNet-Car source outputs.
+
+    Returns:
+        One shell-quoted command line.
+    """
     manifest = manifest_root / f"drivaerml_nested_seed{cell.subset_seed}.json"
-    statistics = stats_root / f"seed{cell.subset_seed}" / f"n{cell.n}_{cell.task}_{cell.frame}.json"
-    runner = repo_root / "recipes/aero_cfd/scripts/run_drivaerml_transfer_strict.py"
-    arguments = [
-        "env",
-        f"PYTHONPATH={repo_root}:{repo_root / 'src'}:{repo_root / 'recipes/aero_cfd/src'}",
-        "uv",
-        "run",
-        "--project",
-        str(repo_root),
-        "--no-sync",
-        "python",
-        str(runner),
-        "--protocol",
-        str(protocol_path),
-        "--dataset-root",
-        str(dataset_root),
-        "--manifest",
-        str(manifest),
-        "--target-statistics",
-        str(statistics),
-        "--output-path",
-        str(output_path),
-        "--source-output-path",
-        str(source_output_path),
-        "--task",
-        cell.task,
-        "--strategy",
-        cell.strategy,
-        "--sample-size",
-        str(cell.n),
-        "--budget",
-        cell.budget,
-        "--coordinate-frame",
-        cell.frame,
-        "--replicate",
-        str(cell.replicate),
-        "--model-seed",
-        str(cell.model_seed),
-        "--eval-point-seed",
-        "4242",
-    ]
-    return shlex.join(arguments)
-
-
-def main() -> None:
-    """Write one auditable command list for a gated release phase."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--protocol", type=Path, required=True)
-    parser.add_argument("--phase", choices=("P0", "P1", "P2", "P2a", "P2b", "P2c", "P3"), required=True)
-    parser.add_argument("--repo-root", type=Path, required=True)
-    parser.add_argument(
-        "--manifest-root",
-        type=Path,
-        help="Manifest directory; defaults to <repo-root>/research/multi_fidelity/evidence/manifests",
+    statistics = (
+        stats_root / f"seed{cell.subset_seed}" / f"n{cell.sample_size}_{cell.task}_{cell.coordinate_frame}.json"
     )
+    return uv_command(
+        repo_root,
+        [str(repo_root / TRAINING_SCRIPT)],
+        [
+            "--protocol",
+            str(protocol_path),
+            "--dataset-root",
+            str(dataset_root),
+            "--manifest",
+            str(manifest),
+            "--target-statistics",
+            str(statistics),
+            "--output-path",
+            str(output_path),
+            "--source-output-path",
+            str(source_output_path),
+            "--task",
+            cell.task,
+            "--strategy",
+            arm.strategy,
+            "--sample-size",
+            str(cell.sample_size),
+            "--budget",
+            cell.budget,
+            "--coordinate-frame",
+            cell.coordinate_frame,
+            "--position-scale",
+            f"{arm.geometry.position_scale:g}",
+            "--supernode-radius",
+            f"{arm.geometry.supernode_radius:g}",
+            "--replicate",
+            str(cell.replicate),
+            "--model-seed",
+            str(cell.model_seed),
+            "--eval-point-seed",
+            "4242",
+        ],
+    )
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Write the auditable training command list.
+
+    Args:
+        argv: Argument vector; ``None`` reads ``sys.argv``.
+
+    Raises:
+        FileNotFoundError: If a required statistics artifact is missing.
+    """
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--repo-root", type=Path, required=True)
+    parser.add_argument("--protocol", type=Path)
+    parser.add_argument("--manifest-root", type=Path, required=True)
+    parser.add_argument("--stats-root", type=Path, required=True)
     parser.add_argument("--dataset-root", type=Path, required=True)
     parser.add_argument("--output-path", type=Path, required=True)
-    parser.add_argument("--stats-root", type=Path, required=True)
     parser.add_argument("--source-output-path", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--arms", nargs="+", choices=ARM_NAMES, default=list(ARM_NAMES))
+    parser.add_argument("--budget", choices=BUDGETS, default="compute_matched")
     parser.add_argument("--allow-missing-stats", action="store_true")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    protocol = yaml.safe_load(args.protocol.read_text(encoding="utf-8"))
     repo_root = args.repo_root.resolve()
-    manifest_root = args.manifest_root or repo_root / DEFAULT_MANIFEST_RELATIVE_ROOT
-    cells = phase_cells(protocol, args.phase)
-    commands = [
-        command_for_cell(
-            cell,
-            repo_root=repo_root,
-            manifest_root=manifest_root,
-            protocol_path=args.protocol.resolve(),
-            dataset_root=args.dataset_root,
-            output_path=args.output_path,
-            stats_root=args.stats_root,
-            source_output_path=args.source_output_path,
-        )
-        for cell in cells
-    ]
-    if not args.allow_missing_stats:
-        missing = []
-        for cell in cells:
-            path = args.stats_root / f"seed{cell.subset_seed}" / f"n{cell.n}_{cell.task}_{cell.frame}.json"
-            if not path.is_file():
-                missing.append(path)
-        if missing:
-            preview = "\n".join(str(path) for path in missing[:10])
-            raise FileNotFoundError(f"{len(missing)} statistics artifacts are missing; first paths:\n{preview}")
+    protocol_path = args.protocol or repo_root / "research/multi_fidelity/experiment_protocol.yaml"
+    cell = PaperCell(budget=args.budget)
+    statistics = (
+        args.stats_root / f"seed{cell.subset_seed}" / (f"n{cell.sample_size}_{cell.task}_{cell.coordinate_frame}.json")
+    )
+    if not args.allow_missing_stats and not statistics.is_file():
+        raise FileNotFoundError(f"statistics artifact is missing: {statistics}")
 
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text("\n".join(commands) + "\n", encoding="utf-8")
-    print(f"phase={args.phase} jobs={len(commands)} output={args.output}")
+    ordered = [arm_by_name(name) for name in args.arms] if args.arms != list(ARM_NAMES) else list(ARMS)
+    write_command_file(
+        args.output,
+        [
+            command_for_arm(
+                arm,
+                cell,
+                repo_root=repo_root,
+                protocol_path=protocol_path,
+                manifest_root=args.manifest_root,
+                stats_root=args.stats_root,
+                dataset_root=args.dataset_root,
+                output_path=args.output_path,
+                source_output_path=args.source_output_path,
+            )
+            for arm in ordered
+        ],
+    )
 
 
 if __name__ == "__main__":

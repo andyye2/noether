@@ -69,7 +69,7 @@ def load_dry_run_config(path: Path) -> tuple[ConfigSchema, dict[str, Any]]:
     audit = payload.get("audit")
     if not isinstance(audit, dict):
         raise ValueError("dry-run YAML has no audit mapping")
-    config = ConfigSchema.model_validate(payload["resolved_config"])
+    config: ConfigSchema = ConfigSchema.model_validate(payload["resolved_config"])
     if set(config.datasets) != {"train", "val"}:
         raise ValueError(f"graph preflight requires train+val-only config, got {sorted(config.datasets)}")
     return config, audit
@@ -93,14 +93,14 @@ def audit_config_radius_graph(
     if config.model is None or config.model.supernode_pooling_config is None:
         raise ValueError("resolved AB-UPT config has no supernode pooling config")
 
-    dataset = DatasetFactory().create(dataset_config)
+    dataset: Any = DatasetFactory().create(dataset_config)
     pool = SupernodePooling(config.model.supernode_pooling_config).to(device)
     design_count = min(design_count, len(dataset))
     all_degrees: list[torch.Tensor] = []
     cells: list[dict[str, Any]] = []
     for point_seed in point_seeds:
         pipeline_config = dataset_config.pipeline.model_copy(update={"seed": point_seed})
-        pipeline = Factory().create(pipeline_config)
+        pipeline: Any = Factory().create(pipeline_config)
         for dataset_index in range(design_count):
             batch = pipeline([dataset[dataset_index]])
             positions = batch["geometry_position"].to(device)

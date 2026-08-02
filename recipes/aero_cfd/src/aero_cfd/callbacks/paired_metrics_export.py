@@ -16,11 +16,22 @@ from .aero_metrics import AeroMetricsCallback, AeroMetricsCallbackConfig
 
 
 class PairedMetricsExportCallbackConfig(AeroMetricsCallbackConfig):
-    """Configuration for one frozen, per-design result export."""
+    """Configuration for one frozen, per-design result export.
+
+    Attributes:
+        output_csv: Destination of the long metric table.
+        method: Preregistered method code of the evaluated run.
+        rendering: Geometry rendering label ``ps<scale>-sr<radius>``. Two arms
+            can share a method and differ only in how geometry was rendered,
+            so the label is part of the row identity.
+        replicate: Preregistered replicate label.
+        train_sample_size: Training-subset size of the evaluated run.
+    """
 
     kind: str | None = "aero_cfd.callbacks.paired_metrics_export.PairedMetricsExportCallback"
     output_csv: str
     method: str = Field(min_length=1)
+    rendering: str = Field(min_length=1)
     replicate: str = Field(min_length=1)
     train_sample_size: int = Field(gt=0)
 
@@ -32,6 +43,7 @@ class PairedMetricsExportCallback(AeroMetricsCallback):
         super().__init__(callback_config=callback_config, **kwargs)
         self.output_csv = Path(callback_config.output_csv)
         self.method = callback_config.method
+        self.rendering = callback_config.rendering
         self.replicate = callback_config.replicate
         self.train_sample_size = callback_config.train_sample_size
 
@@ -86,6 +98,7 @@ class PairedMetricsExportCallback(AeroMetricsCallback):
                 rows.append(
                     {
                         "method": self.method,
+                        "rendering": self.rendering,
                         "replicate": self.replicate,
                         "n": self.train_sample_size,
                         "design_id": int(design_id),
@@ -102,7 +115,7 @@ class PairedMetricsExportCallback(AeroMetricsCallback):
         with temporary.open("w", encoding="utf-8", newline="") as file:
             writer = csv.DictWriter(
                 file,
-                fieldnames=["method", "replicate", "n", "design_id", "field", "relative_l2", "mae"],
+                fieldnames=["method", "rendering", "replicate", "n", "design_id", "field", "relative_l2", "mae"],
             )
             writer.writeheader()
             writer.writerows(rows)

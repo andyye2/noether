@@ -6,15 +6,19 @@ from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
 import json
 import math
 import os
 from pathlib import Path
 from typing import Any
 
+from aero_cfd.multi_fidelity.integrity import sha256_file
+
+#: ``rendering`` is part of the row identity because two arms may share a
+#: method and differ only in how the target geometry was rendered.
 COLUMNS = (
     "method",
+    "rendering",
     "replicate",
     "n",
     "design_id",
@@ -22,16 +26,7 @@ COLUMNS = (
     "relative_l2",
     "mae",
 )
-KEY_COLUMNS = COLUMNS[:5]
-
-
-def _sha256(path: Path) -> str:
-    """Return the SHA-256 digest of one file."""
-    digest = hashlib.sha256()
-    with path.open("rb") as file:
-        for chunk in iter(lambda: file.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+KEY_COLUMNS = COLUMNS[:6]
 
 
 def _integer_identifier(value: str, *, column: str, source: Path, line: int) -> str:
@@ -89,7 +84,7 @@ def load_metric_rows(inputs: list[Path]) -> tuple[list[dict[str, str]], list[dic
                 raise ValueError(f"{source}: missing columns {sorted(missing)}")
             for line, raw in enumerate(reader, start=2):
                 row = {column: raw[column].strip() for column in COLUMNS}
-                for column in ("method", "replicate", "field"):
+                for column in ("method", "rendering", "replicate", "field"):
                     if not row[column]:
                         raise ValueError(f"{source}:{line}: {column} must be non-empty")
                 row["n"] = _integer_identifier(row["n"], column="n", source=source, line=line)
@@ -127,7 +122,7 @@ def load_metric_rows(inputs: list[Path]) -> tuple[list[dict[str, str]], list[dic
         provenance.append(
             {
                 "path": str(source),
-                "sha256": _sha256(source),
+                "sha256": sha256_file(source),
                 "rows": source_rows,
             }
         )
@@ -135,6 +130,7 @@ def load_metric_rows(inputs: list[Path]) -> tuple[list[dict[str, str]], list[dic
     rows.sort(
         key=lambda row: (
             row["method"],
+            row["rendering"],
             row["replicate"],
             int(row["n"]),
             int(row["design_id"]),
@@ -161,7 +157,7 @@ def merge_metric_csvs(inputs: list[Path], output: Path) -> dict[str, Any]:
     os.replace(temporary, resolved_output)
     return {
         "output": str(resolved_output),
-        "output_sha256": _sha256(resolved_output),
+        "output_sha256": sha256_file(resolved_output),
         "rows": len(rows),
         "inputs": provenance,
     }
