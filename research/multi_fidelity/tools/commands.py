@@ -13,6 +13,7 @@ import shlex
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
+PROTOCOL_RELATIVE_PATH = Path("research/multi_fidelity/experiment_protocol.yaml")
 TRAINING_SCRIPT = Path("recipes/aero_cfd/scripts/run_drivaerml_transfer_strict.py")
 EVALUATION_SCRIPT = Path("recipes/aero_cfd/scripts/eval_drivaerml_transfer_frozen.py")
 STATISTICS_MODULE = "research.multi_fidelity.tools.compute_subset_statistics"

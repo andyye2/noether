@@ -34,6 +34,7 @@ from aero_cfd.multi_fidelity.experiment import (
     Strategy,
     Task,
 )
+from aero_cfd.multi_fidelity.protocol import ProtocolBinding
 
 #: Supernode radius that reproduces the source message-graph density.
 SOURCE_MATCHED_SUPERNODE_RADIUS = 0.1
@@ -46,23 +47,41 @@ SOURCE_MATCHED_RENDERING = GeometryRendering(supernode_radius=SOURCE_MATCHED_SUP
 class PaperCell:
     """The single paired data cell every reported arm shares.
 
+    The seeds are read from the preregistration rather than restated here, so
+    the generated commands cannot drift from the protocol the runner validates
+    them against.
+
     Attributes:
+        subset_seed: Subset seed of the replicate.
+        model_seed: Model seed of the replicate.
         task: Preregistered field set.
         sample_size: Training-subset size.
         replicate: Preregistered replicate label.
-        subset_seed: Subset seed of that replicate.
-        model_seed: Model seed of that replicate.
         coordinate_frame: Frame the dataset is expressed in.
         budget: Preregistered stopping rule.
     """
 
+    subset_seed: int
+    model_seed: int
     task: Task = "common"
     sample_size: int = 100
     replicate: int = 0
-    subset_seed: int = 1103
-    model_seed: int = 7103
     coordinate_frame: CoordinateFrame = "shapenet"
     budget: Budget = "compute_matched"
+
+    @classmethod
+    def from_protocol(cls, protocol: ProtocolBinding, *, budget: Budget = "compute_matched") -> PaperCell:
+        """Build the reported cell from the frozen preregistration.
+
+        Args:
+            protocol: Validated protocol binding.
+            budget: Preregistered stopping rule to report under.
+
+        Returns:
+            The reported :class:`PaperCell`.
+        """
+        replicate = protocol.replicate(0)
+        return cls(subset_seed=replicate.subset_seed, model_seed=replicate.model_seed, budget=budget)
 
 
 @dataclass(frozen=True)

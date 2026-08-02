@@ -25,8 +25,9 @@ from aero_cfd.multi_fidelity.integrity import atomic_write_json, read_git_state
 from aero_cfd.multi_fidelity.manifest import DEFAULT_SEEDS, DEFAULT_SIZES, build_study_manifest
 from aero_cfd.multi_fidelity.protocol import FROZEN_PROTOCOL_STATUS, load_protocol_binding
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_PROTOCOL = REPO_ROOT / "research/multi_fidelity/experiment_protocol.yaml"
+from .commands import PROTOCOL_RELATIVE_PATH, REPO_ROOT
+
+DEFAULT_PROTOCOL = REPO_ROOT / PROTOCOL_RELATIVE_PATH
 
 
 def _validate_protocol_grid(protocol_path: Path, seeds: tuple[int, ...], sizes: tuple[int, ...]) -> None:

@@ -23,7 +23,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from .commands import STATISTICS_MODULE, uv_command, write_command_file
+from aero_cfd.multi_fidelity.protocol import load_protocol_binding
+
+from .commands import PROTOCOL_RELATIVE_PATH, REPO_ROOT, STATISTICS_MODULE, uv_command, write_command_file
 from .paper_arms import PaperCell
 
 FIELDS: dict[str, list[str]] = {
@@ -106,9 +108,9 @@ def main(argv: list[str] | None = None) -> None:
         args.output,
         [
             command_for_cell(
-                PaperCell(),
+                PaperCell.from_protocol(load_protocol_binding(REPO_ROOT / PROTOCOL_RELATIVE_PATH)),
                 repo_root=repo_root,
-                protocol_path=args.protocol or repo_root / "research/multi_fidelity/experiment_protocol.yaml",
+                protocol_path=args.protocol or repo_root / PROTOCOL_RELATIVE_PATH,
                 manifest_root=args.manifest_root,
                 stats_root=args.stats_root,
                 dataset_root=args.dataset_root,

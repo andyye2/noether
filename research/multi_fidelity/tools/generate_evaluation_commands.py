@@ -30,7 +30,7 @@ from pathlib import Path
 
 from aero_cfd.multi_fidelity.provenance import PROVENANCE_FILENAME, TrainingProvenance, load_training_provenance
 
-from .commands import EVALUATION_SCRIPT, uv_command, write_command_file
+from .commands import EVALUATION_SCRIPT, PROTOCOL_RELATIVE_PATH, uv_command, write_command_file
 
 CHECKPOINT_TAGS = ("latest", "best_model.loss.val.total")
 
@@ -211,7 +211,7 @@ def main(argv: list[str] | None = None) -> None:
             command_for_cell(
                 cell,
                 repo_root=repo_root,
-                protocol_path=args.protocol or repo_root / "research/multi_fidelity/experiment_protocol.yaml",
+                protocol_path=args.protocol or repo_root / PROTOCOL_RELATIVE_PATH,
                 dataset_root=args.dataset_root,
                 eval_output_root=args.eval_output_root,
                 metrics_root=args.metrics_root,

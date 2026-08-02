@@ -94,7 +94,7 @@ def test_training_generation_requires_the_statistics_artifact(tmp_path: Path) ->
         )
 
 
-def test_statistics_command_targets_the_shared_cell(tmp_path: Path) -> None:
+def test_statistics_command_targets_the_shared_cell(tmp_path: Path, protocol: ProtocolBinding) -> None:
     """All arms share one statistics artifact, so one command is emitted."""
     output = tmp_path / "statistics.txt"
     generate_statistics_commands.main(
@@ -114,7 +114,8 @@ def test_statistics_command_targets_the_shared_cell(tmp_path: Path) -> None:
     lines = output.read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 1
     tokens = _tokens(lines[0])
-    cell = PaperCell()
+    cell = PaperCell.from_protocol(protocol)
+    assert cell.subset_seed == protocol.replicate(0).subset_seed
     assert tokens[tokens.index("--n") + 1] == str(cell.sample_size)
     assert tokens[tokens.index("--manifest") + 1].endswith(f"drivaerml_nested_seed{cell.subset_seed}.json")
     assert "research.multi_fidelity.tools.compute_subset_statistics" in tokens

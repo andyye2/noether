@@ -27,7 +27,7 @@ from noether.core.schemas.initializers import PreviousRunInitializerConfig
 from noether.core.schemas.schema import ConfigSchema
 
 from .integrity import sha256_file
-from .manifest import ManifestCell
+from .manifest import DEFAULT_SIZES, ManifestCell
 from .protocol import ProtocolBinding
 from .statistics import StatisticsBinding, load_statistics_binding
 
@@ -41,7 +41,9 @@ Accelerator = Literal["cpu", "gpu", "mps"]
 TASKS: tuple[Task, ...] = ("common", "full")
 STRATEGIES: tuple[Strategy, ...] = ("scratch", "finetune")
 BUDGETS: tuple[Budget, ...] = ("compute_matched", "fixed_epoch", "smoke")
-SAMPLE_SIZES = (25, 50, 100, 200, 400)
+
+#: A run can only request a size the acquisition ladder actually freezes.
+SAMPLE_SIZES = DEFAULT_SIZES
 
 MODEL_KIND = "noether.modeling.models.aerodynamics.AeroABUPT"
 TRAINER_KIND = "noether.training.trainers.WeightedLossTrainer"

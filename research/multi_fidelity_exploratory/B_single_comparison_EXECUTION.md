@@ -1,5 +1,11 @@
 # 唯一一对一对照执行手册（A = 现有 P-FT vs B = 源匹配几何渲染 P-FT）
 
+> **历史记录。** 本文是 2026-07-27 在 commit `2ec68b9` 上冻结并执行的 exploratory 对照手册，
+> 保留为该次运行的预注册与执行证据。当前实现要报告的那一版实验（含 scratch 对照臂）由
+> [`../multi_fidelity/PAPER_RUN.md`](../multi_fidelity/PAPER_RUN.md) 定义；文中的
+> `drivaerml_transfer_exploratory_array.sbatch` 已由
+> `research/multi_fidelity/slurm/drivaerml_paper_array.sbatch` 取代。
+
 命名空间：exploratory。**不修改、不覆盖**
 `/scratch/andyye2/ABUPT/outputs/multi_fidelity/cf974078…`、
 `/scratch/andyye2/ABUPT/multi_fidelity_artifacts/cf974078…`、

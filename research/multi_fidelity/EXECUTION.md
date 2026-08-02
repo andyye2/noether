@@ -3,7 +3,9 @@
 > **历史文档。** 本文记录 2026-07-16 分阶段全量研究（P0–P3）的执行流程，保留为当时的执行证据。
 > **当前实现要跑的那一版由 [`PAPER_RUN.md`](PAPER_RUN.md) 定义**，本文中的
 > `materialize_study_manifests.py`、`assess_validation_gate.py`、`analyze_transfer_results.py`、
-> `test_transfer_lr_modifiers.py`、`evidence/manifests/`、`evidence/commands/` 等已被替换或删除；
+> `test_transfer_lr_modifiers.py`、`evidence/manifests/`、`evidence/commands/`、
+> `recipes/aero_cfd/jobs/drivaerml_{statistics,transfer}_array_ncsa.job` 等已被替换或删除
+> （批处理入口现在只有 `research/multi_fidelity/slurm/drivaerml_paper_array.sbatch`）；
 > 请勿按本文的命令执行新的实验。
 
 本文把 `experiment_protocol.yaml` 中的预注册设计落实为可复制执行的 NCSA 流程。所有路径和命令均以 2026-07-16 的已审计状态为准；每一阶段只有在上一阶段的检查通过后才可释放。

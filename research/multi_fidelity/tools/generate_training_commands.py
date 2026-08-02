@@ -22,8 +22,9 @@ import argparse
 from pathlib import Path
 
 from aero_cfd.multi_fidelity.experiment import BUDGETS
+from aero_cfd.multi_fidelity.protocol import load_protocol_binding
 
-from .commands import TRAINING_SCRIPT, uv_command, write_command_file
+from .commands import PROTOCOL_RELATIVE_PATH, REPO_ROOT, TRAINING_SCRIPT, uv_command, write_command_file
 from .paper_arms import ARM_NAMES, ARMS, Arm, PaperCell, arm_by_name
 
 
@@ -123,8 +124,13 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     repo_root = args.repo_root.resolve()
-    protocol_path = args.protocol or repo_root / "research/multi_fidelity/experiment_protocol.yaml"
-    cell = PaperCell(budget=args.budget)
+    # The embedded path must be valid on the executing host; the seeds are read
+    # from this checkout, which the runner re-validates against the protocol.
+    protocol_path = args.protocol or repo_root / PROTOCOL_RELATIVE_PATH
+    cell = PaperCell.from_protocol(
+        load_protocol_binding(REPO_ROOT / PROTOCOL_RELATIVE_PATH),
+        budget=args.budget,
+    )
     statistics = (
         args.stats_root / f"seed{cell.subset_seed}" / (f"n{cell.sample_size}_{cell.task}_{cell.coordinate_frame}.json")
     )
