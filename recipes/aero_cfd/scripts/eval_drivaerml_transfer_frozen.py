@@ -68,6 +68,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=CHECKPOINT_SUPERNODE_RADIUS,
         help="Supernode-pooling radius; must equal the value recorded in the training sidecar.",
     )
+    parser.add_argument(
+        "--wall-distance-feature",
+        action="store_true",
+        help="Render the volume wall-distance input feature; must equal the value recorded in the training sidecar.",
+    )
     parser.add_argument("--sample-size", type=int, choices=SAMPLE_SIZES, required=True)
     parser.add_argument("--method", required=True)
     parser.add_argument("--replicate", type=int, choices=range(8), required=True)
@@ -132,6 +137,7 @@ def request_from_args(args: argparse.Namespace) -> EvaluationRequest:
             position_scale=args.position_scale,
             supernode_radius=args.supernode_radius,
         ),
+        wall_distance_feature=args.wall_distance_feature,
         evaluation_split=args.evaluation_split,
         confirm_test_release=args.confirm_test_release,
         eval_output_path=args.eval_output_path,

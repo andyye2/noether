@@ -64,7 +64,8 @@ class ArmMetrics:
         key: Arm identity.
         designs: Official design IDs scored by the arm.
         relative_l2: Geometric-mean relative L2 per field.
-        mae: Arithmetic-mean MAE per field.
+        mse: Arithmetic-mean MSE per field, in squared physical units.
+        mae: Arithmetic-mean MAE per field, in physical units.
         macro_relative_l2: Equal-field geometric aggregate over designs.
         per_design_macro: Equal-field macro per design.
     """
@@ -72,6 +73,7 @@ class ArmMetrics:
     key: ArmKey
     designs: tuple[int, ...]
     relative_l2: dict[str, float]
+    mse: dict[str, float]
     mae: dict[str, float]
     macro_relative_l2: float
     per_design_macro: dict[int, float]
@@ -89,7 +91,7 @@ def group_rows(rows: list[dict[str, str]]) -> dict[ArmKey, dict[tuple[int, str],
         rows: Rows produced by :func:`~.merge_metric_csvs.load_metric_rows`.
 
     Returns:
-        Nested mapping ``arm -> (design_id, field) -> {relative_l2, mae}``.
+        Nested mapping ``arm -> (design_id, field) -> {relative_l2, mse, mae}``.
 
     Raises:
         ValueError: If a row lacks the arm columns, which means it came from
@@ -102,8 +104,7 @@ def group_rows(rows: list[dict[str, str]]) -> dict[ArmKey, dict[tuple[int, str],
             raise ValueError(f"metric row is missing {missing}; regenerate the evaluation exports")
         key = ArmKey(method=row["method"], rendering=row["rendering"])
         grouped[key][(int(row["design_id"]), row["field"])] = {
-            "relative_l2": float(row["relative_l2"]),
-            "mae": float(row["mae"]),
+            metric: float(row[metric]) for metric in ("relative_l2", "mse", "mae")
         }
     return dict(grouped)
 
@@ -136,6 +137,7 @@ def summarize_arm(key: ArmKey, cells: dict[tuple[int, str], dict[str, float]]) -
         relative_l2={
             field: _geometric_mean([cells[(design, field)]["relative_l2"] for design in designs]) for field in fields
         },
+        mse={field: statistics.fmean([cells[(design, field)]["mse"] for design in designs]) for field in fields},
         mae={field: statistics.fmean([cells[(design, field)]["mae"] for design in designs]) for field in fields},
         macro_relative_l2=_geometric_mean(list(per_design_macro.values())),
         per_design_macro=per_design_macro,
@@ -201,6 +203,18 @@ def _markdown(report: dict[str, Any]) -> str:
         cells = " | ".join(f"{arm['relative_l2'][field]:.6f}" for field in fields)
         lines.append(f"| {label} | {cells} | {arm['macro_relative_l2']:.6f} |")
 
+    # Relative L2 is what the arms are compared on, but a reader also needs the
+    # error in the units of the field to judge whether a ratio matters.
+    lines += [
+        "",
+        "| arm | " + " | ".join(f"MSE {field} | MAE {field}" for field in fields) + " |",
+        "| --- | " + " | ".join(["---"] * (2 * len(fields))) + " |",
+    ]
+    for label in sorted(report["arms"]):
+        arm = report["arms"][label]
+        cells = " | ".join(f"{arm['mse'][field]:.6g} | {arm['mae'][field]:.6g}" for field in fields)
+        lines.append(f"| {label} | {cells} |")
+
     if report["contrasts"]:
         lines += [
             "",
@@ -247,6 +261,7 @@ def build_report(inputs: list[Path], *, baseline: ArmKey | None) -> dict[str, An
                 "rendering": key.rendering,
                 "designs": list(arm.designs),
                 "relative_l2": arm.relative_l2,
+                "mse": arm.mse,
                 "mae": arm.mae,
                 "macro_relative_l2": arm.macro_relative_l2,
             }

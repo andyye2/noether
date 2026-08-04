@@ -170,6 +170,8 @@ def command_for_cell(
         "--output-csv",
         str(csv_path),
     ]
+    if provenance["wall_distance_feature"]:
+        arguments.append("--wall-distance-feature")
     if split == "test":
         arguments.append("--confirm-test-release")
     return uv_command(repo_root, [str(repo_root / EVALUATION_SCRIPT)], arguments)

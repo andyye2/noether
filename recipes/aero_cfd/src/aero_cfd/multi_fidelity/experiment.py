@@ -53,6 +53,11 @@ STAGE_NAME = "train"
 #: Parameters whose target-side readout is reset instead of transferred.
 RESET_PATTERN = "backbone.domain_decoder_projections"
 
+#: Token-level input feature projections. The source checkpoint predates them,
+#: so unlike the readout there is nothing to remove: they only have to be
+#: instantiated, or the otherwise strict load would report them missing.
+FEATURE_PROJECTION_PATTERN = "backbone.domain_feature_projs"
+
 #: Preregistered method code of each strategy, used in the metric tables. The
 #: key type is widened because consumers look strategies up from parsed JSON.
 METHOD_BY_STRATEGY: Mapping[str, str] = {"scratch": "S", "finetune": "P-FT"}
@@ -233,13 +238,25 @@ class SourceCheckpoint:
             )
         return checkpoint
 
-    def initializer(self) -> PreviousRunInitializerConfig:
+    def initializer(self, *, instantiate_feature_projections: bool = False) -> PreviousRunInitializerConfig:
         """Build the strict source-trunk/fresh-readout initializer.
 
         The readout projections are removed from the restored state dict and
         re-instantiated, because the DrivAerML fields do not share the source
         output semantics; every other tensor must load strictly.
+
+        Args:
+            instantiate_feature_projections: Also carry the freshly built
+                token-level feature projections into the restored state dict.
+                Requested only by an arm that declares an input feature, so an
+                arm without one keeps the initializer it was audited with.
+
+        Returns:
+            The initializer configuration.
         """
+        patterns_to_instantiate = [RESET_PATTERN]
+        if instantiate_feature_projections:
+            patterns_to_instantiate.append(FEATURE_PROJECTION_PATTERN)
         return PreviousRunInitializerConfig(
             output_path=self.output_path,
             run_id=self.run_id,
@@ -248,7 +265,7 @@ class SourceCheckpoint:
             model_info=self.model_info,
             checkpoint_tag=self.checkpoint_tag,
             patterns_to_remove=[RESET_PATTERN],
-            patterns_to_instantiate=[RESET_PATTERN],
+            patterns_to_instantiate=patterns_to_instantiate,
         )
 
 
@@ -269,6 +286,10 @@ class TrainingRequest:
         smoke_updates: Update count of the ``smoke`` budget.
         coordinate_frame: Frame the dataset is expressed in.
         geometry: Position scale and supernode radius.
+        wall_distance_feature: Give volume tokens their distance to the
+            vehicle surface as an input feature. Both arms of a comparison must
+            set it the same way; a feature arm is not comparable to an arm
+            trained without the feature.
         replicate: Preregistered replicate label.
         model_seed: Seed shared by the paired arms.
         eval_point_seed: Seed of the fixed validation point sampling.
@@ -298,6 +319,7 @@ class TrainingRequest:
     smoke_updates: int = 10
     coordinate_frame: CoordinateFrame = "shapenet"
     geometry: GeometryRendering = GeometryRendering()
+    wall_distance_feature: bool = False
     eval_point_seed: int = 4242
     learning_rate: float = 5e-5
     end_learning_rate: float = 1e-6
@@ -351,6 +373,10 @@ class TrainingRequest:
             expected_updates=self.smoke_updates,
         )
 
+    def feature_run_id_suffix(self) -> str:
+        """Return the run-ID suffix that marks the token-level input feature."""
+        return "-wd" if self.wall_distance_feature else ""
+
     def derive_run_id(self, manifest_cell: ManifestCell) -> str:
         """Return the explicit run ID or the deterministic derived one."""
         if self.run_id is not None:
@@ -358,7 +384,8 @@ class TrainingRequest:
         return (
             f"mf-{self.task}-{self.strategy}-r{self.replicate}-n{self.sample_size}"
             f"-m{manifest_cell.payload_sha256[:10]}-s{self.model_seed}"
-            f"-{self.coordinate_frame}-{self.budget}{self.geometry.run_id_suffix()}"
+            f"-{self.coordinate_frame}-{self.budget}"
+            f"{self.geometry.run_id_suffix()}{self.feature_run_id_suffix()}"
         )
 
 
@@ -465,6 +492,7 @@ def build_experiment(
         coordinate_frame=request.coordinate_frame,
         expected_manifest_sha256=manifest_cell.raw_file_sha256,
         expected_train_subset_size=request.sample_size,
+        wall_distance_feature=request.wall_distance_feature,
         position_scale=request.geometry.position_scale,
     )
 
@@ -473,7 +501,9 @@ def build_experiment(
     model_params["radius"] = request.geometry.supernode_radius
     if request.strategy != "scratch":
         source_checkpoint = request.source.resolve(protocol)
-        model_params["initializers"] = [request.source.initializer()]
+        model_params["initializers"] = [
+            request.source.initializer(instantiate_feature_projections=request.wall_distance_feature)
+        ]
 
     budget = request.resolve_budget()
     train_dataset = preset.build_dataset(
@@ -578,6 +608,8 @@ def build_experiment(
         "supernode_radius_position_fraction": request.geometry.radius_position_fraction,
         "supernode_radius_raw_units": request.geometry.radius_in_raw_units(position_span),
         "position_span_raw_units": position_span,
+        "wall_distance_feature": request.wall_distance_feature,
+        "input_feature": preset.feature_audit(),
         "source_checkpoint": str(source_checkpoint.resolve()) if source_checkpoint else None,
         "source_checkpoint_sha256": protocol.source_primary_sha256 if source_checkpoint else None,
         "model_seed": request.model_seed,

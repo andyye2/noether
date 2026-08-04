@@ -9,8 +9,47 @@ from typing import Literal
 import torch
 
 from noether.core.schemas.dataset import StandardDatasetConfig
+from noether.data import with_normalizers
 from noether.data.datasets.cfd.caeml.drivaerml.dataset import DrivAerMLDataset
 from noether.data.datasets.cfd.caeml.filemap import CAEML_FILEMAP
+
+#: Dataset property, pipeline item, and normalizer key of the wall-distance
+#: feature. The framework derives all three from the ``getitem_`` method name,
+#: and ``DataKeys.as_anchor`` requires exactly one underscore.
+WALL_DISTANCE_PROPERTY = "volume_distance"
+
+#: Unsigned distance from every volume cell centre to the vehicle surface,
+#: precomputed with a KD-tree and stored in metres. ``CAEML_FILEMAP`` leaves
+#: its ``volume_distance_to_surface`` slot empty, so the field is named here
+#: rather than in the framework: the millimetre convention below only holds for
+#: this transfer dataset and must not leak into the production DrivAerML path.
+WALL_DISTANCE_FILENAME = "volume_cell_surface_distance_cKDtree.pt"
+
+#: Reference length the wall distance is expressed in. The framework applies
+#: ``sign(x) * log1p(|x|)`` before the affine normalization, and ``log1p`` is
+#: nearly the identity below its knee. In metres the knee sits at 1 m, which
+#: leaves the 70% of cells within 20 mm of the surface compressed into 0.6% of
+#: the feature's dynamic range; in millimetres it sits at the near-wall cell
+#: spacing (~1.2 mm measured on this mesh) and that share becomes 30.5%. The
+#: unit is therefore the physical choice of where the logarithm stops
+#: resolving, not a formatting detail.
+WALL_DISTANCE_REFERENCE_LENGTH_M = 1e-3
+
+
+def to_wall_distance_feature(tensor: torch.Tensor) -> torch.Tensor:
+    """Express a wall-distance field in units of the reference length.
+
+    Training and statistics fitting must agree on this transform exactly, so
+    both call it rather than restating the unit.
+
+    Args:
+        tensor: Distances in metres, in any shape.
+
+    Returns:
+        The same shape, non-negative, measured in
+        :data:`WALL_DISTANCE_REFERENCE_LENGTH_M`.
+    """
+    return tensor.abs() / WALL_DISTANCE_REFERENCE_LENGTH_M
 
 
 class TransferDrivAerMLDatasetConfig(StandardDatasetConfig):
@@ -118,3 +157,14 @@ class TransferDrivAerMLDataset(DrivAerMLDataset):
             filename,
             coordinate_frame=self.coordinate_frame,
         )
+
+    @with_normalizers
+    def getitem_volume_distance(self, idx: int) -> torch.Tensor:
+        """Retrieve the wall distance at volume cells ``(num_volume_points, 1)``.
+
+        The value is a scalar per cell and therefore frame-independent. It is
+        an input feature, never a target: a preset that does not declare it
+        must list ``volume_distance`` in ``excluded_properties`` so the file is
+        not read at all.
+        """
+        return to_wall_distance_feature(self._load(idx=idx, filename=WALL_DISTANCE_FILENAME)).unsqueeze(1)

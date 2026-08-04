@@ -65,17 +65,47 @@ class AeroCFDPreset(DomainPreset):
         ],
     }
 
+    def pipeline_params(self, model_kind: str, **overrides: Any) -> dict[str, Any]:
+        """Merge pipeline defaults, per-model overrides, and caller overrides."""
+        params: dict[str, Any] = super().build_pipeline(model_kind, **overrides)
+        return params
+
     def build_pipeline(self, model_kind: str, **overrides: Any) -> Any:
         """Build an AeroCFDPipelineConfig with merged parameters."""
         from aero_cfd.pipeline import AeroCFDPipelineConfig
         from noether.core.schemas.statistics import AeroStatsSchema
 
-        params = super().build_pipeline(model_kind, **overrides)
         return AeroCFDPipelineConfig(
             dataset_statistics=AeroStatsSchema(**self.dataset_statistics),
             data_specs=self.data_specs,
-            **params,
+            **self.pipeline_params(model_kind, **overrides),
         )
+
+    def forward_properties(self, model_kind: str) -> list[str]:
+        """Return the forward properties, including the anchor features in use.
+
+        ``forward_properties_map`` is a static list per architecture, but
+        whether a domain carries token-level input features is a property of
+        the data specification and of the merged pipeline parameters. The key
+        is appended only when the pipeline really emits it, so a preset that
+        declares ``feature_dim`` while leaving ``use_physics_features`` off --
+        the ShapeNet-Car source configuration does exactly that -- keeps its
+        current forward properties.
+
+        Args:
+            model_kind: Fully qualified model class path.
+
+        Returns:
+            Forward property names in a stable order.
+        """
+        properties = super().forward_properties(model_kind)
+        if not self.pipeline_params(model_kind).get("use_physics_features", False):
+            return properties
+        for name, spec in self.data_specs.domains.items():
+            anchor_features = f"{name}_anchor_features"
+            if spec.feature_dim and f"{name}_anchor_position" in properties and anchor_features not in properties:
+                properties.append(anchor_features)
+        return properties
 
     def build_dataset(
         self,

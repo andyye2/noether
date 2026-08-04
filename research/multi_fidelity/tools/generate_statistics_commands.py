@@ -12,19 +12,25 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from aero_cfd.datasets.transfer_drivaerml import WALL_DISTANCE_PROPERTY
 from aero_cfd.multi_fidelity.protocol import load_protocol_binding
 
 from .commands import PROTOCOL_RELATIVE_PATH, REPO_ROOT, STATISTICS_MODULE, uv_command, write_command_file
 from .paper_arms import PaperCell
 
+#: The wall-distance feature is fitted for every task even though only the
+#: feature arms consume it. Moments are accumulated per field, so including it
+#: leaves the target statistics bit-identical while keeping one artifact shared
+#: by every arm of the cell -- which is what makes the arms comparable.
 FIELDS: dict[str, list[str]] = {
-    "common": ["surface_pressure", "volume_velocity"],
+    "common": ["surface_pressure", "volume_velocity", WALL_DISTANCE_PROPERTY],
     "full": [
         "surface_pressure",
         "surface_friction",
         "volume_pressure",
         "volume_velocity",
         "volume_vorticity",
+        WALL_DISTANCE_PROPERTY,
     ],
 }
 

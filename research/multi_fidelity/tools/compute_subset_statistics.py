@@ -11,6 +11,7 @@ does not inspect coordinates from any split.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 import hashlib
 import json
 import os
@@ -21,7 +22,13 @@ from typing import Any, Literal
 import torch
 import yaml
 
-from aero_cfd.datasets.transfer_drivaerml import transform_loaded_drivaerml_field
+from aero_cfd.datasets.transfer_drivaerml import (
+    WALL_DISTANCE_FILENAME,
+    WALL_DISTANCE_PROPERTY,
+    WALL_DISTANCE_REFERENCE_LENGTH_M,
+    to_wall_distance_feature,
+    transform_loaded_drivaerml_field,
+)
 from aero_cfd.multi_fidelity.manifest import verify_manifest
 from aero_cfd.multi_fidelity.protocol import FROZEN_PROTOCOL_STATUS
 from noether.data.datasets.cfd.caeml.drivaerml.split import DrivAerMLDefaultSplitIDs
@@ -32,11 +39,17 @@ CoordinateFrame = Literal["native", "shapenet"]
 
 @dataclass(frozen=True)
 class FieldSpec:
-    """On-disk and normalization metadata for one DrivAerML target field."""
+    """On-disk and normalization metadata for one DrivAerML field."""
 
     filename: str
     components: int
     log_scale: bool = False
+    rescale: Callable[[torch.Tensor], torch.Tensor] | None = None
+    """Unit conversion applied before the log scale. It is the dataset's own
+    function, so the fitted moments describe exactly the values the model is
+    later given."""
+    rescale_description: str | None = None
+    """Human-readable form of ``rescale``, recorded in the artifact."""
 
 
 FIELD_SPECS: dict[str, FieldSpec] = {
@@ -47,7 +60,25 @@ FIELD_SPECS: dict[str, FieldSpec] = {
     "volume_pressure": FieldSpec("volume_cell_totalpcoeff.pt", 1),
     "volume_velocity": FieldSpec("volume_cell_velocity.pt", 3),
     "volume_vorticity": FieldSpec("volume_cell_vorticity.pt", 3, log_scale=True),
+    # An input feature rather than a target, but it is normalized from the same
+    # frozen train subset and must obey the same leakage rule, so it is fitted
+    # here rather than in a second tool.
+    WALL_DISTANCE_PROPERTY: FieldSpec(
+        WALL_DISTANCE_FILENAME,
+        1,
+        log_scale=True,
+        rescale=to_wall_distance_feature,
+        rescale_description=f"abs(x) / {WALL_DISTANCE_REFERENCE_LENGTH_M:g} m",
+    ),
 }
+
+
+def _transform_description(spec: FieldSpec) -> str:
+    """Describe the exact transform the fitted moments are taken over."""
+    transform = "sign(x)*log1p(abs(x))" if spec.log_scale else "identity"
+    if spec.rescale_description is None:
+        return transform
+    return f"{spec.rescale_description}, then {transform}"
 
 
 def _read_structured_file(path: Path, raw: bytes) -> dict[str, Any]:
@@ -313,6 +344,8 @@ def compute_subset_statistics(
                     spec.filename,
                     coordinate_frame=coordinate_frame,
                 )
+                if spec.rescale is not None:
+                    aligned = spec.rescale(aligned)
                 if not torch.isfinite(aligned).all():
                     raise ValueError(f"Non-finite values in {path}")
                 moments[field].push_tensor(aligned, dim=1)
@@ -333,7 +366,7 @@ def compute_subset_statistics(
         details[field] = {
             "filename": spec.filename,
             "components": spec.components,
-            "transform": "sign(x)*log1p(abs(x))" if spec.log_scale else "identity",
+            "transform": _transform_description(spec),
             "coordinate_frame": coordinate_frame,
             "count_per_component": stat.count,
             "files_read": files_read[field],
@@ -395,6 +428,8 @@ def compute_nested_subset_statistics(
                     spec.filename,
                     coordinate_frame=coordinate_frame,
                 )
+                if spec.rescale is not None:
+                    aligned = spec.rescale(aligned)
                 if not torch.isfinite(aligned).all():
                     raise ValueError(f"Non-finite values in {path}")
                 moments[field].push_tensor(aligned, dim=1)
@@ -414,7 +449,7 @@ def compute_nested_subset_statistics(
                 details[field] = {
                     "filename": spec.filename,
                     "components": spec.components,
-                    "transform": "sign(x)*log1p(abs(x))" if spec.log_scale else "identity",
+                    "transform": _transform_description(spec),
                     "coordinate_frame": coordinate_frame,
                     "count_per_component": stat.count,
                     "files_read": files_read[field],

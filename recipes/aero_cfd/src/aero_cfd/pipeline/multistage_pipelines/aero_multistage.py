@@ -226,14 +226,20 @@ class AeroMultistagePipeline(MultiStagePipeline):
 
         # next to that we also collate the physics features, which are the concatenation of the surface and volume features. The targets are also included.
         self.default_collator_items += [DataKeys.as_target(item) for item in self.surface_targets | self.volume_targets]
-        self.default_collator_items += (
-            [DataKeys.VOLUME_FEATURES, DataKeys.SURFACE_FEATURES] if self.use_physics_features else []
-        )
-        self.default_collator_items += (
-            [DataKeys.SURFACE_QUERY_FEATURES, DataKeys.VOLUME_QUERY_FEATURES]
-            if self.has_query_points and self.use_physics_features
-            else []
-        )
+        if self.use_physics_features and not self.use_anchor_points:
+            # Anchor models consume the anchor-sampled features instead, which
+            # the anchor processor registers itself. Collating the full-mesh
+            # concatenation next to them would move millions of unused rows.
+            self.default_collator_items += self._feature_keys(
+                {DataKeys.VOLUME_FEATURES: self.volume_features, DataKeys.SURFACE_FEATURES: self.surface_features}
+            )
+            if self.has_query_points:
+                self.default_collator_items += self._feature_keys(
+                    {
+                        DataKeys.VOLUME_QUERY_FEATURES: self.volume_features,
+                        DataKeys.SURFACE_QUERY_FEATURES: self.surface_features,
+                    }
+                )
         self.default_collator_items += self.conditioning_dims.keys() if self.conditioning_dims else []
 
     def _build_sample_processor_pipeline(self) -> list[SampleProcessor]:
@@ -380,44 +386,60 @@ class AeroMultistagePipeline(MultiStagePipeline):
         else:
             return []
 
+    @staticmethod
+    def _feature_keys(features_by_key: dict[str, set[str]]) -> list[str]:
+        """Keep only the concatenated feature keys that a domain actually produces."""
+        return [key for key, features in features_by_key.items() if features]
+
+    @staticmethod
+    def _concat_features(features: set[str], target_key: str, prefix: str = "") -> list[SampleProcessor]:
+        """Concatenate one domain's declared features into a single model input.
+
+        Declaring features on one domain only is a valid configuration -- the
+        wall-distance transfer arm has them on the volume alone -- and
+        ``torch.cat`` rejects an empty list, so a domain without features gets
+        no processor rather than an empty one. The keys are sorted because the
+        concatenation order is the channel order of the model's feature
+        projection, and iterating a set does not fix it across processes.
+
+        Args:
+            features: Declared feature names of the domain.
+            target_key: Key the concatenated tensor is written to.
+            prefix: ``"query"`` or ``"anchor"`` to consume the sampled copies.
+
+        Returns:
+            One processor, or an empty list when the domain has no features.
+        """
+        if not features:
+            return []
+        to_key = {"": lambda key: key, "query": DataKeys.as_query, "anchor": DataKeys.as_anchor}[prefix]
+        return [
+            ConcatTensorSampleProcessor(
+                items=[to_key(item) for item in sorted(features)],
+                target_key=target_key,
+                dim=1,
+            )
+        ]
+
     def _get_concatenated_tensors_sample_processors(self) -> list[SampleProcessor]:
         """
         For most models, the input to the encoder, the query points, and hence the output targets are the concatenation of the surface and volume points.
         We concatenate the surface and volume positions, features, and physics features.
         """
-        sample_processors = []
-        if self.use_physics_features:
-            sample_processors.extend(
-                [
-                    ConcatTensorSampleProcessor(
-                        items=self.volume_features,
-                        target_key="volume_features",
-                        dim=1,
-                    ),
-                    ConcatTensorSampleProcessor(
-                        items=self.surface_features,
-                        target_key="surface_features",
-                        dim=1,
-                    ),
-                ]
-            )
+        sample_processors: list[SampleProcessor] = []
+        # Anchor models concatenate the anchor-sampled features instead; see
+        # ``_get_anchor_point_sampling_sample_processor``.
+        if self.use_physics_features and not self.use_anchor_points:
+            sample_processors += self._concat_features(self.volume_features, DataKeys.VOLUME_FEATURES)
+            sample_processors += self._concat_features(self.surface_features, DataKeys.SURFACE_FEATURES)
 
-        if self.has_query_points:
-            # if we have query points, we also concatenate the query positions and features
-            if self.use_physics_features:
-                sample_processors.extend(
-                    [
-                        ConcatTensorSampleProcessor(
-                            items={DataKeys.as_query(item) for item in self.volume_features},
-                            target_key="volume_query_features",
-                            dim=1,
-                        ),
-                        ConcatTensorSampleProcessor(
-                            items={DataKeys.as_query(item) for item in self.surface_features},
-                            target_key="surface_query_features",
-                            dim=1,
-                        ),
-                    ]
+            if self.has_query_points:
+                # if we have query points, we also concatenate the query positions and features
+                sample_processors += self._concat_features(
+                    self.volume_features, DataKeys.VOLUME_QUERY_FEATURES, prefix="query"
+                )
+                sample_processors += self._concat_features(
+                    self.surface_features, DataKeys.SURFACE_QUERY_FEATURES, prefix="query"
                 )
 
         return sample_processors
@@ -495,22 +517,9 @@ class AeroMultistagePipeline(MultiStagePipeline):
             RenameKeysSampleProcessor(key_map={DataKeys.as_anchor(key): key for key in self.surface_targets}),
         ]
         if self.use_physics_features:
-            processors.extend(
-                [
-                    ConcatTensorSampleProcessor(
-                        items=[DataKeys.as_anchor(key) for key in self.volume_features],
-                        target_key="volume_anchor_features",
-                        dim=1,
-                    ),
-                    ConcatTensorSampleProcessor(
-                        items=[DataKeys.as_anchor(key) for key in self.surface_features],
-                        target_key="surface_anchor_features",
-                        dim=1,
-                    ),
-                ]
+            processors += self._concat_features(self.volume_features, "volume_anchor_features", prefix="anchor")
+            processors += self._concat_features(self.surface_features, "surface_anchor_features", prefix="anchor")
+            self.default_collator_items += self._feature_keys(
+                {"volume_anchor_features": self.volume_features, "surface_anchor_features": self.surface_features}
             )
-            self.default_collator_items += [
-                "volume_anchor_features",
-                "surface_anchor_features",
-            ]
         return processors

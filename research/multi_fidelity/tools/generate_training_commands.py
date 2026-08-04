@@ -61,6 +61,7 @@ def command_for_arm(
     statistics = (
         stats_root / f"seed{cell.subset_seed}" / f"n{cell.sample_size}_{cell.task}_{cell.coordinate_frame}.json"
     )
+    feature_arguments = ["--wall-distance-feature"] if arm.wall_distance_feature else []
     return uv_command(
         repo_root,
         [str(repo_root / TRAINING_SCRIPT)],
@@ -97,6 +98,7 @@ def command_for_arm(
             str(cell.model_seed),
             "--eval-point-seed",
             "4242",
+            *feature_arguments,
         ],
     )
 

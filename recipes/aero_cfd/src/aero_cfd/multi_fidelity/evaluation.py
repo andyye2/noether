@@ -110,6 +110,10 @@ class EvaluationRequest:
         budget: Budget name, verified against the sidecar.
         coordinate_frame: Frame, verified against the sidecar.
         geometry: Geometry rendering, verified against the sidecar.
+        wall_distance_feature: Token-level input feature, verified against the
+            sidecar. A model trained with it cannot be scored without it: the
+            restored checkpoint carries a feature projection whose input the
+            pipeline would then never produce.
         evaluation_split: Official split to score.
         confirm_test_release: Explicit consent required for the test split.
         eval_output_path: Root the evaluation run writes into.
@@ -139,6 +143,7 @@ class EvaluationRequest:
     output_csv: Path
     coordinate_frame: CoordinateFrame = "shapenet"
     geometry: GeometryRendering = GeometryRendering()
+    wall_distance_feature: bool = False
     evaluation_split: EvaluationSplit = "val"
     confirm_test_release: bool = False
     eval_run_id: str | None = None
@@ -213,6 +218,7 @@ def verify_training_provenance(
         "coordinate_frame": request.coordinate_frame,
         "position_scale": request.geometry.position_scale,
         "supernode_radius": request.geometry.supernode_radius,
+        "wall_distance_feature": request.wall_distance_feature,
         "budget": request.budget,
         "subset_seed": replicate.subset_seed,
         "model_seed": replicate.model_seed,
@@ -298,6 +304,7 @@ def build_evaluation(
         coordinate_frame=request.coordinate_frame,
         expected_manifest_sha256=manifest_cell.raw_file_sha256,
         expected_train_subset_size=request.sample_size,
+        wall_distance_feature=request.wall_distance_feature,
         position_scale=request.geometry.position_scale,
     )
     model_params = dict(CHECKPOINT_ARCHITECTURE)
@@ -383,6 +390,8 @@ def build_evaluation(
         "position_scale": request.geometry.position_scale,
         "supernode_radius": request.geometry.supernode_radius,
         "supernode_radius_raw_units": provenance["supernode_radius_raw_units"],
+        "wall_distance_feature": provenance["wall_distance_feature"],
+        "input_feature": provenance["input_feature"],
         "budget": provenance["budget"],
         "model_seed": provenance["model_seed"],
         "training_pipeline_seed": provenance["training_pipeline_seed"],

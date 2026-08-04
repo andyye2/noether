@@ -11,9 +11,15 @@ from typing import Any, Literal
 
 import yaml
 
-from aero_cfd.datasets.transfer_drivaerml import TransferDrivAerMLDatasetConfig
-from noether.core.schemas.dataset import DatasetBaseConfig, DatasetWrappers
+from aero_cfd.datasets.transfer_drivaerml import (
+    WALL_DISTANCE_FILENAME,
+    WALL_DISTANCE_PROPERTY,
+    WALL_DISTANCE_REFERENCE_LENGTH_M,
+    TransferDrivAerMLDatasetConfig,
+)
+from noether.core.schemas.dataset import DatasetBaseConfig, DatasetWrappers, DomainDataSpec, ModelDataSpecs
 from noether.core.schemas.normalizers import (
+    FieldNormalizerConfig,
     MeanStdNormalizerConfig,
     PositionNormalizerConfig,
 )
@@ -27,6 +33,15 @@ _FIELD_COMPONENTS = {
     "volume_pressure": 1,
     "volume_velocity": 3,
     "volume_vorticity": 3,
+    WALL_DISTANCE_PROPERTY: 1,
+}
+
+#: Statistics keys of the wall-distance feature. The suffix follows the
+#: framework convention for a field the normalizer log-scales before the affine
+#: step, as ``volume_vorticity`` already does.
+WALL_DISTANCE_STAT_KEYS = {
+    "mean": f"{WALL_DISTANCE_PROPERTY}_logscale_mean",
+    "std": f"{WALL_DISTANCE_PROPERTY}_logscale_std",
 }
 
 #: RoPE/sincos maximum wavelength of the source-compatible AB-UPT architecture.
@@ -65,14 +80,28 @@ def _validate_numeric_stat(key: str, value: Any) -> list[float] | float:
     return converted if isinstance(value, list) else converted[0]
 
 
-class _DrivAerMLTransferStatsMixin:
+class _DrivAerMLTransferStatsMixin(DrivAerMLPreset):
     """Resolve concrete normalizers from one train-subset-only artifact.
+
+    The base is declared so that every override below is checked against the
+    field definitions it refines. It does not change what ``super()`` reaches:
+    both concrete presets linearize this class ahead of the DrivAerML preset
+    they are mixed into, so the common-field preset still supplies the fields
+    of the common-field transfer arm.
 
     Args:
         statistics_artifact: Train-subset-only statistics artifact (JSON/YAML).
         coordinate_frame: ``"native"`` or ``"shapenet"``; must match the artifact.
         expected_manifest_sha256: Raw-file SHA256 of the frozen subset manifest.
         expected_train_subset_size: Exact N recorded in the artifact.
+        wall_distance_feature: Give every volume token its distance to the
+            vehicle surface as a token-level input feature. The model can only
+            infer that distance through the pooled geometry supernodes, which
+            overestimate it near the wall by a factor of about 3.4 on
+            DrivAerML, so the field is not redundant in the range where the
+            velocity gradient lives. Off by default because it adds an input
+            the ShapeNet-Car source checkpoint never saw, which makes the
+            resulting arm a new arm rather than a rerun of an existing one.
         position_scale: Upper bound of the normalized position range
             ``[0, position_scale]``. Defaults to 1000.0 (the frozen
             confirmatory value), which renders a DrivAerML car only ~39
@@ -92,6 +121,7 @@ class _DrivAerMLTransferStatsMixin:
         coordinate_frame: Literal["native", "shapenet"],
         expected_manifest_sha256: str,
         expected_train_subset_size: int,
+        wall_distance_feature: bool = False,
         position_scale: float = _DEFAULT_POSITION_SCALE,
     ) -> None:
         artifact = _read_mapping(statistics_artifact)
@@ -137,14 +167,93 @@ class _DrivAerMLTransferStatsMixin:
         self.coordinate_frame = coordinate_frame
         self.expected_manifest_sha256 = expected_manifest_sha256
         self.expected_train_subset_size = expected_train_subset_size
+        self.wall_distance_feature = bool(wall_distance_feature)
         self.position_scale = float(position_scale)
         self._transfer_stats = {key: _validate_numeric_stat(key, value) for key, value in stats.items()}
+        # Fails here, before anything is trained, if the artifact was fitted
+        # without the feature this preset was asked to render.
         self.build_normalizers()
 
     @property
     def dataset_statistics(self) -> dict[str, list[float] | float]:
         """Return only the current frozen training-subset statistics."""
         return dict(self._transfer_stats)
+
+    @property
+    def data_specs(self) -> ModelDataSpecs:
+        """Return the inherited specification, plus the volume input feature.
+
+        Only the volume domain gets the feature. A surface point's distance to
+        the surface is identically zero, so the same input would carry no
+        information there, and the model builds a projection per domain that
+        declares one.
+        """
+        specs: ModelDataSpecs = super().data_specs
+        if not self.wall_distance_feature:
+            return specs
+        domains = dict(specs.domains)
+        volume = domains["volume"]
+        domains["volume"] = DomainDataSpec(
+            output_dims=volume.output_dims,
+            feature_dim={WALL_DISTANCE_PROPERTY: 1},
+        )
+        return ModelDataSpecs(
+            position_dim=specs.position_dim,
+            conditioning_dims=specs.conditioning_dims,
+            domains=domains,
+            use_physics_features=True,
+        )
+
+    @property
+    def normalizer_spec(self) -> dict[str, FieldNormalizerConfig]:
+        """Return the inherited normalizers, plus the wall-distance feature.
+
+        The feature arrives in units of
+        :data:`~aero_cfd.datasets.transfer_drivaerml.WALL_DISTANCE_REFERENCE_LENGTH_M`,
+        so the framework's own ``logscale`` step spreads the near-wall band
+        across the feature's range instead of collapsing it.
+        """
+        spec: dict[str, FieldNormalizerConfig] = dict(super().normalizer_spec)
+        if self.wall_distance_feature:
+            spec[WALL_DISTANCE_PROPERTY] = FieldNormalizerConfig(
+                strategy="mean_std",
+                logscale=True,
+                stat_keys=dict(WALL_DISTANCE_STAT_KEYS),
+            )
+        return spec
+
+    @property
+    def excluded_properties(self) -> set[str]:
+        """Read the wall-distance file only when the feature is enabled."""
+        excluded: set[str] = super().excluded_properties
+        return excluded if self.wall_distance_feature else excluded | {WALL_DISTANCE_PROPERTY}
+
+    def pipeline_params(self, model_kind: str, **overrides: Any) -> dict[str, Any]:
+        """Sample physics features exactly when this preset declares one."""
+        params = super().pipeline_params(model_kind, **overrides)
+        params["use_physics_features"] = self.wall_distance_feature
+        return params
+
+    def feature_audit(self) -> dict[str, Any] | None:
+        """Describe the token-level input feature, or ``None`` when it is off.
+
+        The unit is the part a reader cannot recover from the metrics, so it is
+        recorded next to the run rather than left implicit in the code.
+
+        Returns:
+            A JSON-compatible description of the feature, or ``None``.
+        """
+        if not self.wall_distance_feature:
+            return None
+        return {
+            "name": WALL_DISTANCE_PROPERTY,
+            "domain": "volume",
+            "components": _FIELD_COMPONENTS[WALL_DISTANCE_PROPERTY],
+            "source_file": WALL_DISTANCE_FILENAME,
+            "reference_length_m": WALL_DISTANCE_REFERENCE_LENGTH_M,
+            "transform": "abs(d) / reference_length, then sign(x)*log1p(abs(x)), then mean/std",
+            "statistics_keys": dict(WALL_DISTANCE_STAT_KEYS),
+        }
 
     def _required_stat(self, key: str) -> list[float] | float:
         """Return one statistic or raise with the complete available-key set."""

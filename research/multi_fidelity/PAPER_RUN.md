@@ -38,6 +38,14 @@ One paired data cell, crossed with the two factors the audit isolated:
 | `S-matched` | random | 0.1 | separates the geometry repair from the transfer effect |
 | `P-FT-matched` | source trunk, fresh readouts | 0.1 | the single audited improvement under test |
 
+A second, later pair repeats the matched arms with the volume wall-distance
+input feature (see [the feature section](#the-wall-distance-input-feature)):
+
+| arm | initialization | supernode radius | wall distance | role |
+| --- | --- | --- | --- | --- |
+| `S-matched-wd` | random | 0.1 | yes | scratch reference for the feature |
+| `P-FT-matched-wd` | source trunk, fresh readouts | 0.1 | yes | transfer with the feature |
+
 Fixed for every arm: `task=common`, `N=100`, `replicate=0`,
 `coordinate_frame=shapenet`, `budget=compute_matched` (40,000 updates),
 `position_scale=1000`, evaluation split `val`, one manifest, one statistics
@@ -58,6 +66,48 @@ neighbourhood is therefore rescaled through the radius instead:
 
 Both numbers are recorded in every training sidecar, in every metric row, and
 in the run ID, so no result can be mistaken for the other rendering.
+
+## The wall-distance input feature
+
+`--wall-distance-feature` gives every volume token the distance from its cell
+centre to the vehicle surface, as one extra scalar added to its position
+embedding through the backbone's existing `domain_feature_projs` channel.
+
+Why it is not redundant, measured on the local DrivAerML runs: the model can
+only infer that distance through the 1024 pooled geometry supernodes, whose
+nearest-neighbour spacing is 39 mm, while the median cell sits 12 mm from the
+wall. Inside 20 mm — where 70% of the cells and essentially all of the velocity
+gradient are — the supernode estimate overshoots the true distance by a factor
+of 3.4. Conditioning on the true distance instead removes a further 35% of the
+velocity variance that position plus the best derivable distance leaves.
+
+Three things about it are load-bearing and are pinned by
+`tests/unit/multi_fidelity/test_wall_distance_feature.py`:
+
+* **The metric definition does not move.** The feature is one more per-point
+  array sampled by the same seeded permutation, so the evaluated points and the
+  relative-L2 formula are unchanged. It is still a *new arm*: a feature arm may
+  only be paired with another feature arm, never with `S-matched` or
+  `P-FT-matched`.
+* **The model gains exactly four tensors**,
+  `backbone.domain_feature_projs.volume.mlp.{0,2}.{weight,bias}` (+37,440
+  parameters, 0.53%). The source checkpoint predates them, so the transfer
+  initializer adds `backbone.domain_feature_projs` to
+  `patterns_to_instantiate` only — there is nothing to remove — and everything
+  else still loads strictly. An arm without the feature keeps its previous
+  initializer byte for byte.
+* **The unit is the transform.** The feature is expressed in millimetres, i.e.
+  in units of the mesh's near-wall cell spacing, and then log-scaled by the
+  framework's own `logscale` normalizer. In metres, `log1p` is nearly the
+  identity below 1 m and the near-wall band would occupy 0.6% of the feature's
+  range instead of 30%. The unit, the transform, and the statistics keys are
+  recorded in the training sidecar (schema 3).
+
+The feature needs a statistics artifact fitted with the `volume_distance`
+field. `generate_statistics_commands` always requests it, and because moments
+are accumulated per field the target statistics are bit-identical to an
+artifact fitted without it — which is what lets one artifact serve both the
+feature and the no-feature arms of a cell.
 
 ## Sequence
 
@@ -91,7 +141,8 @@ Every step runs through `uv run --no-sync` with
        "$COMMIT" "$ARTIFACTS/commands/statistics.txt"
    ```
 
-3. **Training.** Four arms, one array index each.
+3. **Training.** One array index per arm; six arms are defined, so pass
+   `--arms` unless all of them are wanted.
 
    ```bash
    uv run --no-sync python -m research.multi_fidelity.tools.generate_training_commands \
@@ -99,12 +150,14 @@ Every step runs through `uv run --no-sync` with
        --manifest-root "$ARTIFACTS/manifests" --stats-root "$ARTIFACTS/statistics" \
        --output-path "$OUTPUTS" --source-output-path /scratch/andyye2/ABUPT/outputs \
        --output "$ARTIFACTS/commands/training.txt"
-   sbatch --test-only --array=1-4 research/multi_fidelity/slurm/drivaerml_paper_array.sbatch \
+   sbatch --test-only --array=1-6 research/multi_fidelity/slurm/drivaerml_paper_array.sbatch \
        "$COMMIT" "$ARTIFACTS/commands/training.txt"
    ```
 
    Add `--arms P-FT-matched` to submit a single arm, and `--budget smoke` for a
-   ten-update pipeline check that writes into its own run IDs.
+   ten-update pipeline check that writes into its own run IDs. The array size
+   must equal the number of generated commands, so `--arms S-matched-wd
+   P-FT-matched-wd` pairs with `--array=1-2`.
 
 4. **Frozen evaluation.** Cells are discovered from the training sidecars, so
    this step cannot mislabel a run or evaluate it under the wrong geometry.

@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#SBATCH --job-name=mf-b2-train
+#SBATCH --job-name=mf-b2v-train
 #SBATCH --account=ssingh76-ic
 #SBATCH --partition=IllinoisComputes-GPU
 #SBATCH --gres=gpu:1
@@ -9,19 +9,19 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --time=48:00:00
 #SBATCH --mem=96G
-#SBATCH --output=/scratch/andyye2/ABUPT/slurm/multi_fidelity_B2/%x-%A_%a.out
-#SBATCH --error=/scratch/andyye2/ABUPT/slurm/multi_fidelity_B2/%x-%A_%a.err
+#SBATCH --output=/scratch/andyye2/ABUPT/slurm/multi_fidelity_B2_vtransfer/%x-%A_%a.out
+#SBATCH --error=/scratch/andyye2/ABUPT/slurm/multi_fidelity_B2_vtransfer/%x-%A_%a.err
 #
 # sbatch --array=1-2 $0 <commit> <command-file> <command-file-sha256>
 
 set -euo pipefail
 
-PROJECT_ROOT=/scratch/andyye2/ABUPT/multi_fidelity_B2
+PROJECT_ROOT=/scratch/andyye2/ABUPT/multi_fidelity_B2_vtransfer
 ENV_ROOT=/scratch/andyye2/ABUPT/shapenet-divu0/5-14-restored/.venv
 DATA_ROOT=/scratch/andyye2/data/drivaerml_subsampled_10x
 SOURCE_ROOT=/scratch/andyye2/ABUPT/outputs
 SOURCE_CKPT="$SOURCE_ROOT/2026-04-25_7d0mv/train/checkpoints/ab_upt_cp=latest_model.th"
-SLURM_ROOT=/scratch/andyye2/ABUPT/slurm/multi_fidelity_B2
+SLURM_ROOT=/scratch/andyye2/ABUPT/slurm/multi_fidelity_B2_vtransfer
 CACHE_ROOT=/scratch/andyye2/ABUPT/.cache
 PROTOCOL="$PROJECT_ROOT/research/multi_fidelity/experiment_protocol.yaml"
 
@@ -32,8 +32,10 @@ PROTECTED_ROOTS=(
     /scratch/andyye2/ABUPT/outputs/multi_fidelity/
     /scratch/andyye2/ABUPT/outputs/multi_fidelity_exploratory/
     /scratch/andyye2/ABUPT/outputs/multi_fidelity_paper/
+    /scratch/andyye2/ABUPT/outputs/multi_fidelity_B2/
     /scratch/andyye2/ABUPT/multi_fidelity_artifacts/
     /scratch/andyye2/ABUPT/multi_fidelity_stats/
+    /scratch/andyye2/ABUPT/multi_fidelity_B2_artifacts/
 )
 
 if [[ $# -ne 3 ]]; then
@@ -44,8 +46,8 @@ fi
 COMMIT=$1
 COMMAND_FILE=$2
 EXPECTED_COMMAND_SHA=$3
-ARTIFACT_ROOT="/scratch/andyye2/ABUPT/multi_fidelity_B2_artifacts/$COMMIT"
-OUTPUT_ROOT="/scratch/andyye2/ABUPT/outputs/multi_fidelity_B2/$COMMIT"
+ARTIFACT_ROOT="/scratch/andyye2/ABUPT/multi_fidelity_B2_vtransfer_artifacts/$COMMIT"
+OUTPUT_ROOT="/scratch/andyye2/ABUPT/outputs/multi_fidelity_B2_vtransfer/$COMMIT"
 MANIFEST="$ARTIFACT_ROOT/manifests/drivaerml_nested_seed1103.json"
 STATISTICS="$ARTIFACT_ROOT/statistics/seed1103/n100_common_shapenet.json"
 
@@ -76,7 +78,7 @@ fi
 
 command_count=$(wc -l < "$COMMAND_FILE")
 if [[ $command_count -ne 2 || $SLURM_ARRAY_TASK_ID -lt 1 || $SLURM_ARRAY_TASK_ID -gt 2 ]]; then
-    echo "STOP: B2 training requires two commands and array indices 1..2; count=$command_count index=$SLURM_ARRAY_TASK_ID" >&2
+    echo "STOP: vtransfer training requires two commands and array indices 1..2; count=$command_count index=$SLURM_ARRAY_TASK_ID" >&2
     exit 2
 fi
 if [[ $(grep -c -- '--strategy scratch' "$COMMAND_FILE" || true) -ne 1 ]]; then
@@ -87,19 +89,19 @@ if [[ $(grep -c -- '--strategy finetune' "$COMMAND_FILE" || true) -ne 1 ]]; then
     echo "STOP: command file must contain exactly one finetune arm" >&2
     exit 2
 fi
-# The two arms are only a pair if they read the same inputs. A submission that
-# mixed a wall-distance arm with a plain one would produce a contrast between
-# initialization *and* input, which is not what any of these arms answer.
+# This namespace exists for the wall-distance pair, and the two arms are only a
+# pair if they read the same inputs. A plain arm submitted here would be filed
+# next to feature arms it cannot be compared with.
 feature_arms=$(grep -c -- '--wall-distance-feature' "$COMMAND_FILE" || true)
-if [[ $feature_arms -ne 0 && $feature_arms -ne 2 ]]; then
-    echo "STOP: both arms must set --wall-distance-feature or neither; matched=$feature_arms" >&2
+if [[ $feature_arms -ne 2 ]]; then
+    echo "STOP: the vtransfer namespace requires --wall-distance-feature on both arms; matched=$feature_arms" >&2
     exit 2
 fi
 
 command_line=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "$COMMAND_FILE")
 EXPECTED_PREFIX="env PYTHONPATH=$PROJECT_ROOT:$PROJECT_ROOT/src:$PROJECT_ROOT/recipes/aero_cfd/src uv run --project $PROJECT_ROOT --no-sync python $PROJECT_ROOT/recipes/aero_cfd/scripts/run_drivaerml_transfer_strict.py"
 if [[ $command_line != "$EXPECTED_PREFIX"* ]]; then
-    echo "STOP: command is not the B2 strict-training entry point" >&2
+    echo "STOP: command is not the vtransfer strict-training entry point" >&2
     echo "$command_line" >&2
     exit 2
 fi

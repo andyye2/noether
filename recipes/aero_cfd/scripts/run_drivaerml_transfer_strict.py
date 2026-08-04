@@ -81,6 +81,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "otherwise the radius graph saturates the degree cap and stops carrying shape information."
         ),
     )
+    parser.add_argument(
+        "--wall-distance-feature",
+        action="store_true",
+        help=(
+            "Give every volume token its distance to the vehicle surface as a token-level input feature. "
+            "The pooled geometry supernodes overestimate that distance near the wall by about 3.4x on "
+            "DrivAerML, so the field is not redundant where the velocity gradient lives. It requires a "
+            "statistics artifact fitted with the volume_distance field, and both arms of a comparison "
+            "must set it identically."
+        ),
+    )
     parser.add_argument("--replicate", type=int, choices=range(8), required=True)
     parser.add_argument("--model-seed", type=int, required=True)
     parser.add_argument("--eval-point-seed", type=int, default=4242)
@@ -129,6 +140,7 @@ def request_from_args(args: argparse.Namespace) -> TrainingRequest:
             position_scale=args.position_scale,
             supernode_radius=args.supernode_radius,
         ),
+        wall_distance_feature=args.wall_distance_feature,
         replicate=args.replicate,
         model_seed=args.model_seed,
         eval_point_seed=args.eval_point_seed,

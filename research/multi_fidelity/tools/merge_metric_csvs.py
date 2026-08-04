@@ -12,21 +12,18 @@ import os
 from pathlib import Path
 from typing import Any
 
+from aero_cfd.callbacks.paired_metrics_export import COLUMNS
 from aero_cfd.multi_fidelity.integrity import sha256_file
 
 #: ``rendering`` is part of the row identity because two arms may share a
-#: method and differ only in how the target geometry was rendered.
-COLUMNS = (
-    "method",
-    "rendering",
-    "replicate",
-    "n",
-    "design_id",
-    "field",
-    "relative_l2",
-    "mae",
-)
+#: method and differ only in how the target geometry was rendered. The columns
+#: are taken from the exporter so the reader cannot drift from the writer.
 KEY_COLUMNS = COLUMNS[:6]
+
+#: A relative L2 of exactly zero would mean the surrogate reproduced a CFD
+#: field bit for bit, so it is rejected as a sign of a broken export. The
+#: absolute errors have no such interpretation and only have to be finite.
+STRICTLY_POSITIVE_METRICS = frozenset({"relative_l2"})
 
 
 def _integer_identifier(value: str, *, column: str, source: Path, line: int) -> str:
@@ -94,20 +91,14 @@ def load_metric_rows(inputs: list[Path]) -> tuple[list[dict[str, str]], list[dic
                     source=source,
                     line=line,
                 )
-                row["relative_l2"] = _finite_metric(
-                    row["relative_l2"],
-                    column="relative_l2",
-                    source=source,
-                    line=line,
-                    strictly_positive=True,
-                )
-                row["mae"] = _finite_metric(
-                    row["mae"],
-                    column="mae",
-                    source=source,
-                    line=line,
-                    strictly_positive=False,
-                )
+                for column in COLUMNS[6:]:
+                    row[column] = _finite_metric(
+                        row[column],
+                        column=column,
+                        source=source,
+                        line=line,
+                        strictly_positive=column in STRICTLY_POSITIVE_METRICS,
+                    )
                 key = tuple(row[column] for column in KEY_COLUMNS)
                 if key in seen:
                     previous_source, previous_line = seen[key]
@@ -149,7 +140,7 @@ def merge_metric_csvs(inputs: list[Path], output: Path) -> dict[str, Any]:
     resolved_output.parent.mkdir(parents=True, exist_ok=True)
     temporary = resolved_output.with_name(f".{resolved_output.name}.{os.getpid()}.tmp")
     with temporary.open("w", encoding="utf-8", newline="") as file:
-        writer = csv.DictWriter(file, fieldnames=COLUMNS)
+        writer = csv.DictWriter(file, fieldnames=list(COLUMNS))
         writer.writeheader()
         writer.writerows(rows)
         file.flush()

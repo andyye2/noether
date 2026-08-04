@@ -12,7 +12,28 @@ from typing import Any
 import torch
 from pydantic import Field
 
-from .aero_metrics import AeroMetricsCallback, AeroMetricsCallbackConfig
+from .aero_metrics import AeroMetricsCallback, AeroMetricsCallbackConfig, MetricType
+
+#: Per-design metrics carried into the table, keyed by the suffix the metric
+#: callback names them with. All three describe the same prediction: relative
+#: L2 is scale-free and comparable across fields, while MSE and MAE keep the
+#: physical units a reader needs to judge whether a difference matters.
+EXPORTED_METRICS: dict[str, str] = {
+    MetricType.L2ERR: "relative_l2",
+    MetricType.MSE: "mse",
+    MetricType.MAE: "mae",
+}
+
+#: Column order of the exported long table.
+COLUMNS: tuple[str, ...] = (
+    "method",
+    "rendering",
+    "replicate",
+    "n",
+    "design_id",
+    "field",
+    *EXPORTED_METRICS.values(),
+)
 
 
 class PairedMetricsExportCallbackConfig(AeroMetricsCallbackConfig):
@@ -77,23 +98,24 @@ class PairedMetricsExportCallback(AeroMetricsCallback):
         for key, values in results.items():
             if key == "design_id":
                 continue
-            if key.endswith("_l2err"):
-                field = key.removesuffix("_l2err")
-                field_metrics.setdefault(field, {})["relative_l2"] = values.detach().cpu().reshape(-1)
-            elif key.endswith("_mae"):
-                field = key.removesuffix("_mae")
-                field_metrics.setdefault(field, {})["mae"] = values.detach().cpu().reshape(-1)
+            for suffix, column in EXPORTED_METRICS.items():
+                if key.endswith(f"_{suffix}"):
+                    field = key.removesuffix(f"_{suffix}")
+                    field_metrics.setdefault(field, {})[column] = values.detach().cpu().reshape(-1)
+                    break
 
         rows: list[dict[str, str | int | float]] = []
         for field, metrics in sorted(field_metrics.items()):
-            relative_l2 = metrics.get("relative_l2")
-            mae = metrics.get("mae")
-            if relative_l2 is None or mae is None:
-                raise ValueError(f"field {field!r} does not have both relative-L2 and MAE")
-            if relative_l2.numel() != design_ids.numel() or mae.numel() != design_ids.numel():
-                raise ValueError(f"field {field!r} metric count does not match design IDs")
-            if not torch.isfinite(relative_l2).all() or not torch.isfinite(mae).all():
-                raise ValueError(f"field {field!r} contains non-finite metrics")
+            missing = [column for column in EXPORTED_METRICS.values() if column not in metrics]
+            if missing:
+                raise ValueError(f"field {field!r} is missing the metrics {missing}")
+            for column, values in sorted(metrics.items()):
+                if values.numel() != design_ids.numel():
+                    raise ValueError(
+                        f"field {field!r} has {values.numel()} {column} values for {design_ids.numel()} designs"
+                    )
+                if not torch.isfinite(values).all():
+                    raise ValueError(f"field {field!r} contains non-finite {column}")
             for index, design_id in enumerate(design_ids.tolist()):
                 rows.append(
                     {
@@ -103,8 +125,7 @@ class PairedMetricsExportCallback(AeroMetricsCallback):
                         "n": self.train_sample_size,
                         "design_id": int(design_id),
                         "field": field,
-                        "relative_l2": float(relative_l2[index]),
-                        "mae": float(mae[index]),
+                        **{column: float(metrics[column][index]) for column in EXPORTED_METRICS.values()},
                     }
                 )
 
@@ -113,10 +134,7 @@ class PairedMetricsExportCallback(AeroMetricsCallback):
         self.output_csv.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.output_csv.with_name(f".{self.output_csv.name}.{os.getpid()}.tmp")
         with temporary.open("w", encoding="utf-8", newline="") as file:
-            writer = csv.DictWriter(
-                file,
-                fieldnames=["method", "rendering", "replicate", "n", "design_id", "field", "relative_l2", "mae"],
-            )
+            writer = csv.DictWriter(file, fieldnames=list(COLUMNS))
             writer.writeheader()
             writer.writerows(rows)
             file.flush()

@@ -27,6 +27,7 @@ def _row(method: str, rendering: str, design_id: int, field: str, relative_l2: f
         "design_id": str(design_id),
         "field": field,
         "relative_l2": repr(relative_l2),
+        "mse": "0.25",
         "mae": "0.5",
     }
 
@@ -34,7 +35,7 @@ def _row(method: str, rendering: str, design_id: int, field: str, relative_l2: f
 def _write(path: Path, rows: list[dict[str, str]]) -> Path:
     """Write one metric CSV in the exported schema."""
     with path.open("w", encoding="utf-8", newline="") as file:
-        writer = csv.DictWriter(file, fieldnames=COLUMNS)
+        writer = csv.DictWriter(file, fieldnames=list(COLUMNS))
         writer.writeheader()
         writer.writerows(rows)
     return path

@@ -92,6 +92,8 @@ class Arm:
         name: Short arm identifier used in file names and reports.
         strategy: ``scratch`` or ``finetune``.
         geometry: Position scale and supernode radius.
+        wall_distance_feature: Give volume tokens their distance to the
+            vehicle surface as a token-level input feature.
         role: Why the arm is in the comparison.
     """
 
@@ -99,11 +101,17 @@ class Arm:
     strategy: Strategy
     geometry: GeometryRendering
     role: str
+    wall_distance_feature: bool = False
 
 
 #: The 2x2 design: initialization crossed with geometry rendering.  The
 #: scratch arms are what make the transfer effect separable from the effect of
 #: repairing the geometry graph.
+#:
+#: The ``-wd`` arms repeat the matched pair with the wall-distance input
+#: feature.  They are a second 2x2 rather than two extra points, because the
+#: feature changes what the model reads and a feature arm may only be compared
+#: with another feature arm.
 ARMS: tuple[Arm, ...] = (
     Arm(
         name="S-frozen",
@@ -128,6 +136,20 @@ ARMS: tuple[Arm, ...] = (
         strategy="finetune",
         geometry=SOURCE_MATCHED_RENDERING,
         role="the single audited improvement under test",
+    ),
+    Arm(
+        name="S-matched-wd",
+        strategy="scratch",
+        geometry=SOURCE_MATCHED_RENDERING,
+        wall_distance_feature=True,
+        role="scratch reference for the feature; pairs with P-FT-matched-wd",
+    ),
+    Arm(
+        name="P-FT-matched-wd",
+        strategy="finetune",
+        geometry=SOURCE_MATCHED_RENDERING,
+        wall_distance_feature=True,
+        role="transfer with the wall-distance feature; the arm under test",
     ),
 )
 

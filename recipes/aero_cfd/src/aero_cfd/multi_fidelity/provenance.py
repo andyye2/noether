@@ -10,6 +10,11 @@ Schema 2 makes the geometry rendering mandatory.  Schema 1 allowed it to be
 absent and silently assumed the frozen defaults, which meant a sidecar written
 before the rendering options existed was indistinguishable from one written by
 a run that had genuinely used them.
+
+Schema 3 does the same for the token-level input feature.  A model trained
+with the wall-distance feature reads an input the others do not, so a sidecar
+that merely omitted the field would let such a run be paired with one that was
+never given it.
 """
 
 from __future__ import annotations
@@ -24,7 +29,7 @@ from .experiment import METHOD_BY_STRATEGY, TrainingRequest
 from .integrity import GitState, atomic_write_json, is_sha256, sha256_file, stable_sha256
 
 PROVENANCE_FILENAME = "training_provenance.json"
-PROVENANCE_SCHEMA_VERSION = 2
+PROVENANCE_SCHEMA_VERSION = 3
 PROVENANCE_KIND = "drivaerml_transfer_training_provenance"
 
 #: Top-level configuration fields the runtime assigns rather than the
@@ -101,6 +106,8 @@ def write_training_provenance(
         "supernode_radius": audit["supernode_radius"],
         "supernode_radius_position_fraction": audit["supernode_radius_position_fraction"],
         "supernode_radius_raw_units": audit["supernode_radius_raw_units"],
+        "wall_distance_feature": audit["wall_distance_feature"],
+        "input_feature": audit["input_feature"],
         "budget": request.budget,
         "expected_updates": audit["budget"]["expected_updates"],
         "subset_seed": audit["manifest"]["seed"],
@@ -190,6 +197,18 @@ def load_training_provenance(sidecar_path: Path) -> TrainingProvenance:
         value = payload.get(key)
         if isinstance(value, bool) or not isinstance(value, int | float):
             raise ValueError(f"training provenance must record numeric {key}, got {value!r}")
+
+    wall_distance_feature = payload.get("wall_distance_feature")
+    if not isinstance(wall_distance_feature, bool):
+        raise ValueError(
+            f"training provenance must record the wall-distance feature flag, got {wall_distance_feature!r}"
+        )
+    input_feature = payload.get("input_feature")
+    if wall_distance_feature != isinstance(input_feature, dict):
+        raise ValueError(
+            "training provenance input_feature must be described exactly when the feature is enabled: "
+            f"wall_distance_feature={wall_distance_feature!r}, input_feature={input_feature!r}"
+        )
     if not is_sha256(payload.get("resolved_config_sha256")):
         raise ValueError("training provenance has no valid resolved config SHA256")
     if not isinstance(payload.get("implementation_git_dirty"), bool):
