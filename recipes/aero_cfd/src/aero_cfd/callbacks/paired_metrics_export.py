@@ -71,16 +71,18 @@ class PairedMetricsExportCallback(AeroMetricsCallback):
             elif key.endswith("_mae"):
                 field = key.removesuffix("_mae")
                 field_metrics.setdefault(field, {})["mae"] = values.detach().cpu().reshape(-1)
+            elif key.endswith("_mse"):
+                field = key.removesuffix("_mse")
+                field_metrics.setdefault(field, {})["mse"] = values.detach().cpu().reshape(-1)
 
         rows: list[dict[str, str | int | float]] = []
         for field, metrics in sorted(field_metrics.items()):
-            relative_l2 = metrics.get("relative_l2")
-            mae = metrics.get("mae")
-            if relative_l2 is None or mae is None:
-                raise ValueError(f"field {field!r} does not have both relative-L2 and MAE")
-            if relative_l2.numel() != design_ids.numel() or mae.numel() != design_ids.numel():
+            missing = sorted({"relative_l2", "mae", "mse"} - set(metrics))
+            if missing:
+                raise ValueError(f"field {field!r} is missing {missing}")
+            if any(values.numel() != design_ids.numel() for values in metrics.values()):
                 raise ValueError(f"field {field!r} metric count does not match design IDs")
-            if not torch.isfinite(relative_l2).all() or not torch.isfinite(mae).all():
+            if any(not torch.isfinite(values).all() for values in metrics.values()):
                 raise ValueError(f"field {field!r} contains non-finite metrics")
             for index, design_id in enumerate(design_ids.tolist()):
                 rows.append(
@@ -90,8 +92,9 @@ class PairedMetricsExportCallback(AeroMetricsCallback):
                         "n": self.train_sample_size,
                         "design_id": int(design_id),
                         "field": field,
-                        "relative_l2": float(relative_l2[index]),
-                        "mae": float(mae[index]),
+                        "relative_l2": float(metrics["relative_l2"][index]),
+                        "mse": float(metrics["mse"][index]),
+                        "mae": float(metrics["mae"][index]),
                     }
                 )
 
@@ -102,7 +105,7 @@ class PairedMetricsExportCallback(AeroMetricsCallback):
         with temporary.open("w", encoding="utf-8", newline="") as file:
             writer = csv.DictWriter(
                 file,
-                fieldnames=["method", "replicate", "n", "design_id", "field", "relative_l2", "mae"],
+                fieldnames=["method", "replicate", "n", "design_id", "field", "relative_l2", "mse", "mae"],
             )
             writer.writeheader()
             writer.writerows(rows)
