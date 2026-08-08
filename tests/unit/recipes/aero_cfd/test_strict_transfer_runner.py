@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import json
 import shlex
+import sys
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ import yaml
 from aero_cfd.model.transfer_reset import DEFAULT_RESET_SCOPE, reset_patterns
 from research.multi_fidelity.tools import materialize_study_manifests
 from research.multi_fidelity.tools.generate_training_commands import Cell, command_for_cell, phase_cells
+from research.multi_fidelity.tools.generate_training_commands import main as generate_training_commands_main
 from recipes.aero_cfd.scripts.run_drivaerml_transfer_strict import (
     FROZEN_PROTOCOL_STATUS,
     KNOWN_SOURCE_SHA256,
@@ -265,6 +267,51 @@ def test_reset_phase_commands_carry_the_scope_only_when_it_is_not_default() -> N
     tokens = _r1_command(volume_decoder)
     assert tokens[tokens.index("--reset-scope") + 1] == "volume_decoder"
     assert tokens[tokens.index("--supernode-radius") + 1] == "0.1"
+
+
+def test_generated_commands_name_the_protocol_inside_the_target_repository(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A list generated on one machine for another must embed no local path."""
+    remote_root = Path("/scratch/andyye2/ABUPT/multi_fidelity_reset")
+    output = tmp_path / "training.txt"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "generate_training_commands.py",
+            "--protocol",
+            str(PROTOCOL),
+            "--phase",
+            "R1",
+            "--repo-root",
+            str(remote_root),
+            "--manifest-root",
+            str(remote_root / "manifests"),
+            "--dataset-root",
+            "/scratch/andyye2/data/drivaerml_subsampled_10x",
+            "--output-path",
+            "/scratch/andyye2/ABUPT/outputs/mf",
+            "--stats-root",
+            "/scratch/andyye2/ABUPT/stats",
+            "--source-output-path",
+            "/scratch/andyye2/ABUPT/outputs",
+            "--output",
+            str(output),
+            "--allow-missing-stats",
+        ],
+    )
+    generate_training_commands_main()
+
+    lines = output.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 4
+    for line in lines:
+        tokens = shlex.split(line)
+        assert tokens[tokens.index("--protocol") + 1] == str(
+            remote_root / "research/multi_fidelity/experiment_protocol.yaml"
+        )
+        assert str(REPO_ROOT) not in line
 
 
 def test_protocol_primary_source_matches_audited_constant(tmp_path: Path) -> None:

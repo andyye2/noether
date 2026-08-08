@@ -16,6 +16,10 @@ from aero_cfd.model.transfer_reset import DEFAULT_RESET_SCOPE
 
 Phase = Literal["P0", "P1", "P2", "P2a", "P2b", "P2c", "P3", "R1"]
 DEFAULT_MANIFEST_RELATIVE_ROOT = Path("research/multi_fidelity/evidence/manifests")
+#: Where the protocol sits inside the repository the commands will run from.
+#: The generated text has to name that copy, not the one being read here, so a
+#: command list stays valid when it is generated on one machine for another.
+PROTOCOL_RELATIVE_PATH = Path("research/multi_fidelity/experiment_protocol.yaml")
 
 #: Runner defaults; a cell that matches one leaves the flag off the command line
 #: so that every preregistered phase renders exactly the text it rendered before.
@@ -199,7 +203,7 @@ def main() -> None:
             cell,
             repo_root=repo_root,
             manifest_root=manifest_root,
-            protocol_path=args.protocol.resolve(),
+            protocol_path=repo_root / PROTOCOL_RELATIVE_PATH,
             dataset_root=args.dataset_root,
             output_path=args.output_path,
             stats_root=args.stats_root,

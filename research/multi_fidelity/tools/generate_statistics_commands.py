@@ -12,9 +12,9 @@ from collections.abc import Sequence
 import yaml
 
 if __package__:
-    from .generate_training_commands import Cell, Phase, phase_cells
+    from .generate_training_commands import PROTOCOL_RELATIVE_PATH, Cell, Phase, phase_cells
 else:
-    from generate_training_commands import Cell, Phase, phase_cells
+    from generate_training_commands import PROTOCOL_RELATIVE_PATH, Cell, Phase, phase_cells
 
 DEFAULT_MANIFEST_RELATIVE_ROOT = Path("research/multi_fidelity/evidence/manifests")
 FIELDS = {
@@ -164,7 +164,7 @@ def main() -> None:
         args.phases,
         repo_root=repo_root,
         manifest_root=manifest_root,
-        protocol_path=args.protocol.resolve(),
+        protocol_path=repo_root / PROTOCOL_RELATIVE_PATH,
         dataset_root=args.dataset_root,
         stats_root=args.stats_root,
     )
