@@ -1,6 +1,13 @@
 # Copyright © 2026 Emmi AI GmbH. All rights reserved.
 
-"""Strict-load a legacy ShapeNet AB-UPT trunk into current DrivAer targets."""
+"""Strict-load a legacy ShapeNet AB-UPT trunk into current DrivAer targets.
+
+Runs the same remove/instantiate/strict-load operation as
+:class:`~noether.core.initializers.previous_run.PreviousRunInitializer` for one
+named scope of :data:`~aero_cfd.model.transfer_reset.RESET_SCOPES`, so the
+parameter accounting printed here is the accounting a training run would get.
+Pass ``--reset-scope all`` to report every scope against the same checkpoint.
+"""
 
 from __future__ import annotations
 
@@ -12,12 +19,12 @@ from typing import Any, Literal
 
 import torch
 
+from aero_cfd.model.transfer_reset import DEFAULT_RESET_SCOPE, RESET_SCOPES, reset_patterns
 from aero_cfd.presets.drivaerml import DrivAerMLPreset
 from aero_cfd.presets.drivaerml_common import DrivAerMLCommonFieldsPreset
 from noether.modeling.models.aerodynamics import AeroABUPT
 
 MODEL_KIND = "noether.modeling.models.aerodynamics.AeroABUPT"
-RESET_PATTERN = "backbone.domain_decoder_projections"
 CHECKPOINT_ARCHITECTURE: dict[str, Any] = {
     "hidden_dim": 192,
     "geometry_depth": 1,
@@ -49,8 +56,30 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def verify_load(checkpoint_path: Path, task: Literal["common", "full"]) -> dict[str, Any]:
-    """Perform the exact remove/instantiate/strict-load transfer operation."""
+def verify_load(
+    checkpoint_path: Path,
+    task: Literal["common", "full"],
+    reset_scope: str = DEFAULT_RESET_SCOPE,
+) -> dict[str, Any]:
+    """Perform the exact remove/instantiate/strict-load transfer operation.
+
+    Args:
+        checkpoint_path: Source checkpoint holding the pretrained trunk.
+        task: Target field set to build the receiving model for.
+        reset_scope: Named scope of parameters the transfer re-initializes.
+
+    Returns:
+        Load evidence and the exact parameter accounting of that scope.
+
+    Raises:
+        AssertionError: If the strict load reports missing or unexpected keys.
+    """
+    patterns = reset_patterns(reset_scope)
+
+    def is_reset(key: str) -> bool:
+        """Whether one state-dict key is re-initialized rather than inherited."""
+        return any(pattern in key for pattern in patterns)
+
     preset = DrivAerMLCommonFieldsPreset() if task == "common" else DrivAerMLPreset()
     model_config = preset.build_model(model_kind=MODEL_KIND, **CHECKPOINT_ARCHITECTURE)
     model = AeroABUPT(model_config=model_config)
@@ -59,23 +88,21 @@ def verify_load(checkpoint_path: Path, task: Literal["common", "full"]) -> dict[
     source_checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     source_state = source_checkpoint["state_dict"]
 
-    merged = {key: value for key, value in source_state.items() if RESET_PATTERN not in key}
+    merged = {key: value for key, value in source_state.items() if not is_reset(key)}
     for key, value in target_state.items():
-        if RESET_PATTERN in key:
+        if is_reset(key):
             merged[key] = value.clone()
     incompatible = model.load_state_dict(merged, strict=True)
     if incompatible.missing_keys or incompatible.unexpected_keys:
         raise AssertionError(f"strict load unexpectedly returned {incompatible}")
 
-    compatible_parameter_names = [
-        name for name in target_parameters if name in source_state and RESET_PATTERN not in name
-    ]
+    compatible_parameter_names = [name for name in target_parameters if name in source_state and not is_reset(name)]
     compatible_parameters = sum(target_parameters[name].numel() for name in compatible_parameter_names)
     total_parameters = sum(parameter.numel() for parameter in model.parameters())
-    reset_parameters = sum(parameter.numel() for name, parameter in target_parameters.items() if RESET_PATTERN in name)
+    reset_parameters = sum(parameter.numel() for name, parameter in target_parameters.items() if is_reset(name))
     total_state_elements = sum(value.numel() for value in target_state.values())
     compatible_state_elements = sum(
-        target_state[key].numel() for key in target_state if key in source_state and RESET_PATTERN not in key
+        target_state[key].numel() for key in target_state if key in source_state and not is_reset(key)
     )
     return {
         "checkpoint": str(checkpoint_path.resolve()),
@@ -84,10 +111,12 @@ def verify_load(checkpoint_path: Path, task: Literal["common", "full"]) -> dict[
         "strict_load_succeeded": True,
         "missing_keys": incompatible.missing_keys,
         "unexpected_keys": incompatible.unexpected_keys,
-        "reset_pattern": RESET_PATTERN,
+        "reset_scope": reset_scope,
+        "reset_patterns": patterns,
         "compatible_trainable_parameters": compatible_parameters,
         "total_trainable_parameters": total_parameters,
         "reset_trainable_parameters": reset_parameters,
+        "reset_fraction_of_trainable_parameters": reset_parameters / total_parameters,
         "compatible_fraction_of_trainable_parameters": compatible_parameters / total_parameters,
         "compatible_state_elements": compatible_state_elements,
         "total_state_elements": total_state_elements,
@@ -102,11 +131,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("checkpoint", type=Path)
     parser.add_argument("--task", choices=("common", "full", "both"), default="both")
+    parser.add_argument("--reset-scope", choices=(*RESET_SCOPES, "all"), default=DEFAULT_RESET_SCOPE)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
 
     tasks = ("common", "full") if args.task == "both" else (args.task,)
-    report = {task: verify_load(args.checkpoint, task) for task in tasks}
+    scopes = tuple(RESET_SCOPES) if args.reset_scope == "all" else (args.reset_scope,)
+    report = {f"{task}/{scope}": verify_load(args.checkpoint, task, scope) for task in tasks for scope in scopes}
     rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.output is None:
         print(rendered, end="")

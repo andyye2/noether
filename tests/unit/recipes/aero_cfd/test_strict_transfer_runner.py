@@ -13,18 +13,22 @@ from pathlib import Path
 import pytest
 import yaml
 
+from aero_cfd.model.transfer_reset import DEFAULT_RESET_SCOPE, reset_patterns
 from research.multi_fidelity.tools import materialize_study_manifests
 from research.multi_fidelity.tools.generate_training_commands import Cell, command_for_cell
 from recipes.aero_cfd.scripts.run_drivaerml_transfer_strict import (
     FROZEN_PROTOCOL_STATUS,
     KNOWN_SOURCE_SHA256,
+    build_callbacks,
     build_experiment_config,
     build_lr_modifiers,
     load_manifest_cell,
     load_protocol_binding,
+    reset_scope_suffix,
     sha256_file,
     require_frozen_protocol_for_execution,
     source_checkpoint_path,
+    transfer_initializer,
     write_training_provenance_sidecar,
 )
 
@@ -73,6 +77,7 @@ def _scratch_args(stats_path: Path, tmp_path: Path) -> argparse.Namespace:
         coordinate_frame="shapenet",
         position_scale=1000.0,
         supernode_radius=9.0,
+        reset_scope=DEFAULT_RESET_SCOPE,
         replicate=0,
         model_seed=7103,
         eval_point_seed=4242,
@@ -259,6 +264,53 @@ def test_transfer_lr_multipliers_must_be_finite_and_positive(tmp_path: Path, val
     args.body_lr_multiplier = value
     with pytest.raises(ValueError, match="finite and positive"):
         build_lr_modifiers(args)
+
+
+def test_default_reset_scope_keeps_the_published_run_identity() -> None:
+    """Every frozen run identity must stay byte-identical to what was submitted."""
+    assert reset_scope_suffix("finetune", DEFAULT_RESET_SCOPE) == ""
+    assert reset_scope_suffix("scratch", DEFAULT_RESET_SCOPE) == ""
+
+
+def test_wider_reset_scope_claims_its_own_run_identity() -> None:
+    """A different initialization must not overwrite the default scope's outputs."""
+    assert reset_scope_suffix("finetune", "volume_decoder") == "-rsvolume_decoder"
+
+
+def test_scratch_never_carries_a_reset_scope_suffix() -> None:
+    """Scratch initializes every parameter, so no scope can distinguish it."""
+    assert reset_scope_suffix("scratch", "volume_decoder") == ""
+
+
+@pytest.mark.parametrize("scope", ["readout", "volume_decoder", "volume_path", "decoder"])
+def test_initializer_removes_and_reinstates_the_same_scope(tmp_path: Path, scope: str) -> None:
+    """Whatever is dropped from the source must be the part built fresh."""
+    args = _scratch_args(tmp_path / "unused.json", tmp_path)
+    args.strategy = "finetune"
+    args.reset_scope = scope
+    initializer = transfer_initializer(args)
+    assert initializer.patterns_to_remove == reset_patterns(scope)
+    assert initializer.patterns_to_instantiate == reset_patterns(scope)
+
+
+def test_wider_reset_scope_refuses_layered_learning_rates(tmp_path: Path) -> None:
+    """The body/head LR split is only well defined for the single-pattern scope."""
+    args = _scratch_args(tmp_path / "unused.json", tmp_path)
+    args.strategy = "finetune"
+    args.reset_scope = "volume_decoder"
+    args.body_lr_multiplier = 0.1
+    with pytest.raises(ValueError, match="cannot be combined with LR multipliers"):
+        build_lr_modifiers(args)
+
+
+def test_staged_strategies_train_the_whole_reset_scope(tmp_path: Path) -> None:
+    """Linear probing must train exactly the parameters that were reinitialized."""
+    args = _scratch_args(tmp_path / "unused.json", tmp_path)
+    args.strategy = "linear_probe"
+    args.reset_scope = "volume_path"
+    staged = [callback for callback in build_callbacks(args, 40_000) if hasattr(callback, "stages")]
+    assert len(staged) == 1
+    assert staged[0].stages[0].trainable_patterns == reset_patterns("volume_path")
 
 
 @pytest.mark.parametrize(

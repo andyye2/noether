@@ -25,6 +25,13 @@ from aero_cfd.callbacks.staged_transfer import (
     StagedTransferCallbackConfig,
     TransferStageConfig,
 )
+from aero_cfd.model.transfer_reset import (
+    DECODER_BLOCKS_PATTERN,
+    DEFAULT_RESET_SCOPE,
+    READOUT_PATTERN,
+    RESET_SCOPES,
+    reset_patterns,
+)
 from aero_cfd.presets.drivaerml_transfer import (
     DrivAerMLTransferCommonPreset,
     DrivAerMLTransferFullPreset,
@@ -45,8 +52,6 @@ from noether.training.runners import HydraRunner
 
 MODEL_KIND = "noether.modeling.models.aerodynamics.AeroABUPT"
 TRAINER_KIND = "noether.training.trainers.WeightedLossTrainer"
-RESET_PATTERN = "backbone.domain_decoder_projections"
-DECODER_PATTERN = "backbone.domain_decoder_blocks"
 TRANSFER_STRATEGIES = ("scratch", "finetune", "linear_probe", "gradual_unfreeze")
 TASKS = ("common", "full")
 BUDGETS = ("compute_matched", "fixed_epoch", "smoke")
@@ -403,6 +408,8 @@ def write_training_provenance_sidecar(
         "coordinate_frame": audit["coordinate_frame"],
         "position_scale": audit["position_scale"],
         "supernode_radius": audit["supernode_radius"],
+        "reset_scope": audit["reset_scope"],
+        "reset_patterns": audit["reset_patterns"],
         "budget": args.budget,
         "subset_seed": audit["manifest"]["seed"],
         "model_seed": args.model_seed,
@@ -466,7 +473,8 @@ def training_budget(args: argparse.Namespace) -> dict[str, int | None]:
 
 
 def transfer_initializer(args: argparse.Namespace) -> PreviousRunInitializerConfig:
-    """Build the strict source-trunk/fresh-readout initializer."""
+    """Build the strict source-trunk/fresh-scope initializer."""
+    patterns = reset_patterns(args.reset_scope)
     return PreviousRunInitializerConfig(
         output_path=args.source_output_path,
         run_id=args.source_run_id,
@@ -474,9 +482,25 @@ def transfer_initializer(args: argparse.Namespace) -> PreviousRunInitializerConf
         model_name=args.source_model_name,
         model_info=args.source_model_info,
         checkpoint_tag=args.source_checkpoint_tag,
-        patterns_to_remove=[RESET_PATTERN],
-        patterns_to_instantiate=[RESET_PATTERN],
+        patterns_to_remove=patterns,
+        patterns_to_instantiate=patterns,
     )
+
+
+def reset_scope_suffix(strategy: str, reset_scope: str) -> str:
+    """Return the run-id fragment that distinguishes a non-default reset scope.
+
+    Args:
+        strategy: Transfer strategy of the run.
+        reset_scope: Requested scope name.
+
+    Returns:
+        An empty string for every published identity of the frozen study, which
+        are the scratch arm and the default scope, and ``-rs<scope>`` otherwise.
+    """
+    if strategy == "scratch" or reset_scope == DEFAULT_RESET_SCOPE:
+        return ""
+    return f"-rs{reset_scope}"
 
 
 def build_lr_modifiers(args: argparse.Namespace) -> list[ParamGroupModifierConfig] | None:
@@ -485,6 +509,18 @@ def build_lr_modifiers(args: argparse.Namespace) -> list[ParamGroupModifierConfi
         if args.body_lr_multiplier is not None or args.decoder_lr_multiplier is not None:
             raise ValueError("LR multipliers are transfer-only; scratch must use the base LR")
         return None
+
+    # The body multiplier is expressed as "everything except the fresh part",
+    # which LrScaleExceptPatternModifier can only state as a single pattern. A
+    # wider reset scope has more than one, so the two options are refused
+    # together rather than silently scaling part of the fresh scope as body.
+    if args.reset_scope != DEFAULT_RESET_SCOPE and (
+        args.body_lr_multiplier is not None or args.decoder_lr_multiplier is not None
+    ):
+        raise ValueError(
+            f"--reset-scope {args.reset_scope} cannot be combined with LR multipliers: "
+            "the body/head split is only well defined for the single-pattern default scope"
+        )
 
     body_multiplier = args.body_lr_multiplier
     decoder_multiplier = args.decoder_lr_multiplier
@@ -505,7 +541,7 @@ def build_lr_modifiers(args: argparse.Namespace) -> list[ParamGroupModifierConfi
         modifiers.append(
             ParamGroupModifierConfig(
                 kind="aero_cfd.optimizer.transfer_lr_modifiers.LrScaleExceptPatternModifier",
-                name=RESET_PATTERN,
+                name=READOUT_PATTERN,
                 scale=body_multiplier,
             )
         )
@@ -513,7 +549,7 @@ def build_lr_modifiers(args: argparse.Namespace) -> list[ParamGroupModifierConfi
         modifiers.append(
             ParamGroupModifierConfig(
                 kind="aero_cfd.optimizer.transfer_lr_modifiers.LrScaleByPatternModifier",
-                name=DECODER_PATTERN,
+                name=DECODER_BLOCKS_PATTERN,
                 scale=decoder_multiplier / body_multiplier,
             )
         )
@@ -543,11 +579,14 @@ def build_callbacks(args: argparse.Namespace, expected_updates: int) -> list[Any
             metric_key="loss/val/total",
         ),
     ]
+    # The staged strategies train exactly what the initializer re-instantiated,
+    # so they follow the reset scope rather than assuming it is the readout.
+    fresh_patterns = reset_patterns(args.reset_scope)
     if args.strategy == "linear_probe":
         callbacks.append(
             StagedTransferCallbackConfig(
                 every_n_updates=expected_updates,
-                stages=[TransferStageConfig(start_update=0, trainable_patterns=[RESET_PATTERN])],
+                stages=[TransferStageConfig(start_update=0, trainable_patterns=fresh_patterns)],
             )
         )
     elif args.strategy == "gradual_unfreeze":
@@ -557,10 +596,10 @@ def build_callbacks(args: argparse.Namespace, expected_updates: int) -> list[Any
             StagedTransferCallbackConfig(
                 every_n_updates=head_end,
                 stages=[
-                    TransferStageConfig(start_update=0, trainable_patterns=[RESET_PATTERN]),
+                    TransferStageConfig(start_update=0, trainable_patterns=fresh_patterns),
                     TransferStageConfig(
                         start_update=head_end,
-                        trainable_patterns=[RESET_PATTERN, DECODER_PATTERN],
+                        trainable_patterns=[*fresh_patterns, DECODER_BLOCKS_PATTERN],
                     ),
                     TransferStageConfig(start_update=decoder_end, train_all=True),
                 ],
@@ -650,10 +689,13 @@ def build_experiment_config(
         geometry_suffix += f"-ps{args.position_scale:g}"
     if args.supernode_radius != CHECKPOINT_ARCHITECTURE["radius"]:
         geometry_suffix += f"-sr{args.supernode_radius:g}"
+    # Appended after the geometry suffix so that every published run identity of
+    # the default scope stays byte-identical.
+    transfer_suffix = reset_scope_suffix(args.strategy, args.reset_scope)
     run_id = args.run_id or (
         f"mf-{task}-{args.strategy}-r{args.replicate}-n{args.sample_size}"
         f"-m{manifest_cell['payload_sha256'][:10]}-s{args.model_seed}"
-        f"-{args.coordinate_frame}-{args.budget}{geometry_suffix}"
+        f"-{args.coordinate_frame}-{args.budget}{geometry_suffix}{transfer_suffix}"
     )
     config = preset.build_config(
         model_kind=MODEL_KIND,
@@ -691,6 +733,8 @@ def build_experiment_config(
         "coordinate_frame": args.coordinate_frame,
         "position_scale": args.position_scale,
         "supernode_radius": args.supernode_radius,
+        "reset_scope": args.reset_scope if args.strategy != "scratch" else None,
+        "reset_patterns": reset_patterns(args.reset_scope) if args.strategy != "scratch" else None,
         "source_checkpoint": str(source_checkpoint.resolve()) if source_checkpoint else None,
         "source_checkpoint_sha256": source_checkpoint_sha256,
         "model_seed": args.model_seed,
@@ -741,6 +785,18 @@ def parse_args() -> argparse.Namespace:
             "comparable to the source pretraining."
         ),
     )
+    parser.add_argument(
+        "--reset-scope",
+        choices=tuple(RESET_SCOPES),
+        default=DEFAULT_RESET_SCOPE,
+        help=(
+            "Which parameters the transfer re-initializes instead of inheriting. "
+            f"{DEFAULT_RESET_SCOPE!r} is the frozen confirmatory value and keeps only the "
+            "architecturally incompatible readout fresh; the wider scopes additionally "
+            "discard the per-domain decoder path, which is disjoint from the other domain's "
+            "parameters. Transfer strategies only."
+        ),
+    )
     parser.add_argument("--replicate", type=int, choices=range(8), required=True)
     parser.add_argument("--model-seed", type=int, required=True)
     parser.add_argument("--eval-point-seed", type=int, default=4242)
@@ -781,6 +837,8 @@ def parse_args() -> argparse.Namespace:
         parser.error("--position-scale must be finite and positive")
     if not math.isfinite(args.supernode_radius) or args.supernode_radius <= 0:
         parser.error("--supernode-radius must be finite and positive")
+    if args.strategy == "scratch" and args.reset_scope != DEFAULT_RESET_SCOPE:
+        parser.error("--reset-scope is transfer-only; scratch initializes every parameter")
     return args
 
 

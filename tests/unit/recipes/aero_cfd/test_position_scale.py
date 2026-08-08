@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from aero_cfd.model.transfer_reset import DEFAULT_RESET_SCOPE
 from aero_cfd.presets.drivaerml_transfer import DrivAerMLTransferCommonPreset
 from recipes.aero_cfd.scripts import eval_drivaerml_transfer_frozen
 from recipes.aero_cfd.scripts.eval_drivaerml_transfer_frozen import build_eval_config
@@ -86,6 +87,7 @@ def _scratch_args(
         coordinate_frame="shapenet",
         position_scale=position_scale,
         supernode_radius=supernode_radius,
+        reset_scope=DEFAULT_RESET_SCOPE,
         replicate=0,
         model_seed=7103,
         eval_point_seed=4242,

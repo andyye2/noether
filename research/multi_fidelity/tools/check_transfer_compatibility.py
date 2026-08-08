@@ -15,6 +15,7 @@ from typing import Any, Literal
 
 import torch
 
+from aero_cfd.model.transfer_reset import DEFAULT_RESET_SCOPE, RESET_SCOPES
 from aero_cfd.presets import DrivAerMLPreset
 from noether.core.schemas.dataset import DomainDataSpec, ModelDataSpecs
 from noether.modeling.models.aerodynamics import AeroABUPT
@@ -29,7 +30,7 @@ CHECKPOINT_ARCHITECTURE: dict[str, Any] = {
     "mlp_expansion_factor": 4,
     "radius": 9,
 }
-RESET_PATTERNS = ("backbone.domain_decoder_projections",)
+RESET_PATTERNS = RESET_SCOPES[DEFAULT_RESET_SCOPE]
 
 
 class DrivAerMLCommonFieldsPreset(DrivAerMLPreset):

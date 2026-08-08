@@ -85,6 +85,26 @@ This approach is useful for:
 - Fine-tuning on a new dataset
 - Starting a new training run with pretrained weights
 
+Choosing What to Re-initialize
+------------------------------
+
+``patterns_to_remove`` drops matching keys from the checkpoint and
+``patterns_to_instantiate`` refills them from the freshly built model, so passing
+the same list to both replaces exactly that part of the network. Both match with
+a plain substring test, which means a module path such as
+``backbone.domain_decoder_blocks.volume`` selects one domain of a
+:class:`torch.nn.ModuleDict` while leaving the other domains inherited.
+
+How much to re-initialize is an experimental variable, not a detail: anything
+inherited carries the source task's prior into the target run. The aerodynamics
+recipe names its choices in :mod:`aero_cfd.model.transfer_reset` and exposes them
+as ``--reset-scope`` on ``run_drivaerml_transfer_strict.py``; a scope wider than
+the default appends ``-rs<scope>`` to the run ID so the runs cannot collide.
+
+Use ``research/multi_fidelity/tools/verify_strict_transfer_load.py`` to confirm
+that a scope still loads strictly and to see exactly how many parameters it
+re-initializes before spending compute on it.
+
 
 Use Cases
 ---------
