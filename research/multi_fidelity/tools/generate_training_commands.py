@@ -12,8 +12,15 @@ from typing import Literal
 
 import yaml
 
-Phase = Literal["P0", "P1", "P2", "P2a", "P2b", "P2c", "P3"]
+from aero_cfd.model.transfer_reset import DEFAULT_RESET_SCOPE
+
+Phase = Literal["P0", "P1", "P2", "P2a", "P2b", "P2c", "P3", "R1"]
 DEFAULT_MANIFEST_RELATIVE_ROOT = Path("research/multi_fidelity/evidence/manifests")
+
+#: Runner defaults; a cell that matches one leaves the flag off the command line
+#: so that every preregistered phase renders exactly the text it rendered before.
+DEFAULT_POSITION_SCALE = 1000.0
+DEFAULT_SUPERNODE_RADIUS = 9.0
 
 
 @dataclass(frozen=True)
@@ -28,6 +35,9 @@ class Cell:
     strategy: str
     budget: str
     frame: str = "shapenet"
+    position_scale: float = DEFAULT_POSITION_SCALE
+    supernode_radius: float = DEFAULT_SUPERNODE_RADIUS
+    reset_scope: str = DEFAULT_RESET_SCOPE
 
 
 def _protocol_replicates(protocol: dict) -> list[dict[str, int]]:
@@ -50,7 +60,7 @@ def phase_cells(protocol: dict, phase: Phase) -> list[Cell]:
         raise ValueError(f"protocol train_sample_sizes must be {expected_sizes}, got {sizes}")
     cells: list[Cell] = []
 
-    def add(rep_indices, ns, task, strategies, budget, frame="shapenet"):
+    def add(rep_indices, ns, task, strategies, budget, frame="shapenet", **overrides):
         for rep_index in rep_indices:
             rep = reps[rep_index]
             for n in ns:
@@ -65,6 +75,7 @@ def phase_cells(protocol: dict, phase: Phase) -> list[Cell]:
                             strategy=strategy,
                             budget=budget,
                             frame=frame,
+                            **overrides,
                         )
                     )
 
@@ -83,6 +94,15 @@ def phase_cells(protocol: dict, phase: Phase) -> list[Cell]:
         add(range(3), [50, 100], "common", ["scratch", "finetune"], "compute_matched", "native")
     elif phase == "P3":
         add(range(5), [50, 100, 200, 400], "full", ["scratch", "finetune"], "compute_matched")
+    elif phase == "R1":
+        # Exploratory, not part of the preregistered ladder. One replicate at the
+        # geometry rendering of the reported sr0.1 cells: a scratch anchor, the
+        # default-scope transfer arm that anchor is paired with, and the two
+        # volume-side scopes under test. Scratch takes no scope, so the four arms
+        # differ only in how much of the volume path is inherited.
+        add([0], [100], "common", ["scratch"], "compute_matched", supernode_radius=0.1)
+        for scope in ("readout", "volume_decoder", "volume_path"):
+            add([0], [100], "common", ["finetune"], "compute_matched", supernode_radius=0.1, reset_scope=scope)
     else:
         raise ValueError(f"unsupported phase {phase}")
     return cells
@@ -142,6 +162,12 @@ def command_for_cell(
         "--eval-point-seed",
         "4242",
     ]
+    if cell.position_scale != DEFAULT_POSITION_SCALE:
+        arguments += ["--position-scale", f"{cell.position_scale:g}"]
+    if cell.supernode_radius != DEFAULT_SUPERNODE_RADIUS:
+        arguments += ["--supernode-radius", f"{cell.supernode_radius:g}"]
+    if cell.reset_scope != DEFAULT_RESET_SCOPE:
+        arguments += ["--reset-scope", cell.reset_scope]
     return shlex.join(arguments)
 
 
@@ -149,7 +175,7 @@ def main() -> None:
     """Write one auditable command list for a gated release phase."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--protocol", type=Path, required=True)
-    parser.add_argument("--phase", choices=("P0", "P1", "P2", "P2a", "P2b", "P2c", "P3"), required=True)
+    parser.add_argument("--phase", choices=("P0", "P1", "P2", "P2a", "P2b", "P2c", "P3", "R1"), required=True)
     parser.add_argument("--repo-root", type=Path, required=True)
     parser.add_argument(
         "--manifest-root",

@@ -15,7 +15,7 @@ import yaml
 
 from aero_cfd.model.transfer_reset import DEFAULT_RESET_SCOPE, reset_patterns
 from research.multi_fidelity.tools import materialize_study_manifests
-from research.multi_fidelity.tools.generate_training_commands import Cell, command_for_cell
+from research.multi_fidelity.tools.generate_training_commands import Cell, command_for_cell, phase_cells
 from recipes.aero_cfd.scripts.run_drivaerml_transfer_strict import (
     FROZEN_PROTOCOL_STATUS,
     KNOWN_SOURCE_SHA256,
@@ -220,6 +220,51 @@ def test_generated_command_uses_remote_protocol_and_uv_project() -> None:
     assert tokens[tokens.index("--replicate") + 1] == "0"
     assert tokens[tokens.index("--manifest") + 1] == str(manifest_root / "drivaerml_nested_seed1103.json")
     assert "--point-seed" not in tokens
+    # A cell that sits on the runner defaults renders no geometry or reset flag,
+    # so every preregistered phase keeps the command text it was released with.
+    assert "--position-scale" not in tokens
+    assert "--supernode-radius" not in tokens
+    assert "--reset-scope" not in tokens
+
+
+def _r1_command(cell: Cell) -> list[str]:
+    """Render one exploratory reset cell and return its tokens."""
+    repo_root = Path("/scratch/andyye2/ABUPT/multi_fidelity_reset")
+    command = command_for_cell(
+        cell,
+        repo_root=repo_root,
+        manifest_root=repo_root / "manifests",
+        protocol_path=repo_root / "research/multi_fidelity/experiment_protocol.yaml",
+        dataset_root=Path("/scratch/andyye2/data/drivaerml_subsampled_10x"),
+        output_path=Path("/scratch/andyye2/ABUPT/outputs/mf"),
+        stats_root=Path("/scratch/andyye2/ABUPT/stats"),
+        source_output_path=Path("/scratch/andyye2/ABUPT/outputs"),
+    )
+    return shlex.split(command)
+
+
+def test_reset_phase_pairs_one_anchor_with_three_transfer_scopes() -> None:
+    """R1 varies only how much of the volume path each transfer arm inherits."""
+    protocol = yaml.safe_load(PROTOCOL.read_text(encoding="utf-8"))
+    cells = phase_cells(protocol, "R1")
+
+    assert [cell.strategy for cell in cells] == ["scratch", "finetune", "finetune", "finetune"]
+    assert {cell.replicate for cell in cells} == {0}
+    assert {cell.n for cell in cells} == {100}
+    assert {cell.supernode_radius for cell in cells} == {0.1}
+    assert [cell.reset_scope for cell in cells[1:]] == ["readout", "volume_decoder", "volume_path"]
+
+
+def test_reset_phase_commands_carry_the_scope_only_when_it_is_not_default() -> None:
+    """The default-scope arm must stay the run the anchor is paired with."""
+    protocol = yaml.safe_load(PROTOCOL.read_text(encoding="utf-8"))
+    scratch, default_scope, volume_decoder, _ = phase_cells(protocol, "R1")
+
+    assert "--reset-scope" not in _r1_command(scratch)
+    assert "--reset-scope" not in _r1_command(default_scope)
+    tokens = _r1_command(volume_decoder)
+    assert tokens[tokens.index("--reset-scope") + 1] == "volume_decoder"
+    assert tokens[tokens.index("--supernode-radius") + 1] == "0.1"
 
 
 def test_protocol_primary_source_matches_audited_constant(tmp_path: Path) -> None:
