@@ -67,9 +67,9 @@ def test_mse_is_carried_only_when_every_input_reports_it(tmp_path: Path) -> None
     both = tmp_path / "both.csv"
     merge_metric_csvs([with_mse, also_with_mse], both)
     header, first_row = both.read_text(encoding="utf-8").splitlines()[:2]
-    # Optional metrics are appended, so the required column order never moves.
-    assert header == "method,replicate,n,design_id,field,relative_l2,mae,mse"
-    assert first_row == "P-FT,0,25,10,surface_pressure,0.1,0.1,2.0"
+    # The merged table keeps the column order its inputs were exported with.
+    assert header == "method,replicate,n,design_id,field,relative_l2,mse,mae"
+    assert first_row == "P-FT,0,25,10,surface_pressure,0.1,2.0,0.1"
 
     legacy = tmp_path / "legacy.csv"
     _write(legacy, [{key: value for key, value in row_pft.items() if key != "mse"}])

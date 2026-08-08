@@ -25,6 +25,17 @@ COLUMNS = (
 #: Carried through when every input reports it. Exports written before the
 #: metric was added to the callback do not have it, and those tables still merge.
 OPTIONAL_COLUMNS = ("mse",)
+#: Column order of the merged table, matching the order the callback exports.
+MERGED_COLUMN_ORDER = (
+    "method",
+    "replicate",
+    "n",
+    "design_id",
+    "field",
+    "relative_l2",
+    "mse",
+    "mae",
+)
 KEY_COLUMNS = COLUMNS[:5]
 
 
@@ -176,7 +187,8 @@ def load_metric_rows(inputs: list[Path]) -> tuple[list[dict[str, str]], list[dic
             row["field"],
         )
     )
-    return rows, provenance, [*COLUMNS, *present_optional]
+    carried = {*COLUMNS, *present_optional}
+    return rows, provenance, [column for column in MERGED_COLUMN_ORDER if column in carried]
 
 
 def merge_metric_csvs(inputs: list[Path], output: Path) -> dict[str, Any]:
