@@ -142,7 +142,7 @@ def main() -> None:
     parser.add_argument(
         "--phases",
         nargs="+",
-        choices=("P0", "P1", "P2", "P2a", "P2b", "P2c", "P3"),
+        choices=("P0", "P1", "P2", "P2a", "P2b", "P2c", "P3", "R1"),
         required=True,
     )
     parser.add_argument("--repo-root", type=Path, required=True)
