@@ -487,6 +487,42 @@ def transfer_initializer(args: argparse.Namespace) -> PreviousRunInitializerConf
     )
 
 
+def method_label(strategy: str, reset_scope: str | None = None) -> str:
+    """Return the published method label of one arm.
+
+    The label is what the metric export writes into every row, what the merge
+    tool deduplicates on, and what the evaluation commands use as an output
+    directory. Two arms that share a label cannot be told apart downstream, so a
+    non-default reset scope has to appear here as well as in the run ID.
+
+    Args:
+        strategy: Transfer strategy of the run.
+        reset_scope: Reset scope of the run, or ``None`` for a run recorded
+            before the option existed, which used the default scope.
+
+    Returns:
+        The bare strategy label for scratch and for the default scope, leaving
+        every already-published label unchanged, and a scope-qualified label
+        otherwise.
+
+    Example:
+
+        .. testcode::
+
+            from recipes.aero_cfd.scripts.run_drivaerml_transfer_strict import method_label
+
+            print(method_label("finetune"), method_label("finetune", "volume_decoder"))
+
+        .. testoutput::
+
+            P-FT P-FT-rsvolume_decoder
+    """
+    base = METHOD_BY_STRATEGY[strategy]
+    if strategy == "scratch" or reset_scope is None or reset_scope == DEFAULT_RESET_SCOPE:
+        return base
+    return f"{base}-rs{reset_scope}"
+
+
 def reset_scope_suffix(strategy: str, reset_scope: str) -> str:
     """Return the run-id fragment that distinguishes a non-default reset scope.
 
@@ -725,7 +761,7 @@ def build_experiment_config(
         "protocol_sha256": protocol_binding["sha256"],
         "task": task,
         "strategy": args.strategy,
-        "method": METHOD_BY_STRATEGY[args.strategy],
+        "method": method_label(args.strategy, args.reset_scope),
         "replicate": args.replicate,
         "budget": budget,
         "manifest": manifest_cell,

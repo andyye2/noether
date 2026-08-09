@@ -14,9 +14,12 @@ from aero_cfd.model.transfer_reset import (
 )
 from aero_cfd.presets.drivaerml_common import DrivAerMLCommonFieldsPreset
 from noether.modeling.models.aerodynamics import AeroABUPT
+from research.multi_fidelity.tools.generate_evaluation_commands import method_label as generator_method_label
 from recipes.aero_cfd.scripts.run_drivaerml_transfer_strict import (
     CHECKPOINT_ARCHITECTURE,
+    METHOD_BY_STRATEGY,
     MODEL_KIND,
+    method_label,
 )
 
 #: Parameter counts of the frozen ShapeNet-Car architecture, per scope.
@@ -81,6 +84,32 @@ def test_scope_resets_the_documented_parameter_count(scope: str, parameter_names
     )
     assert sum(parameter.numel() for parameter in model.parameters()) == TOTAL_PARAMETERS
     assert reset == EXPECTED_RESET_PARAMETERS[scope]
+
+
+def test_default_scope_keeps_every_published_method_label() -> None:
+    """Labels of already-published runs must not move under the new option."""
+    for strategy, label in METHOD_BY_STRATEGY.items():
+        assert method_label(strategy, DEFAULT_RESET_SCOPE) == label
+        assert method_label(strategy, None) == label
+
+
+def test_a_wider_scope_gets_its_own_method_label() -> None:
+    """Two arms sharing a label collide in the merged table and the eval paths."""
+    assert method_label("finetune", "volume_decoder") == "P-FT-rsvolume_decoder"
+    assert method_label("finetune", "volume_path") == "P-FT-rsvolume_path"
+    assert len({method_label("finetune", scope) for scope in RESET_SCOPES}) == len(RESET_SCOPES)
+
+
+def test_scratch_never_carries_a_scope_in_its_label() -> None:
+    """Scratch has no source to inherit from, so no scope can qualify it."""
+    assert method_label("scratch", "volume_decoder") == "S"
+
+
+@pytest.mark.parametrize("strategy", sorted(METHOD_BY_STRATEGY))
+@pytest.mark.parametrize("scope", [None, *sorted(RESET_SCOPES)])
+def test_method_label_rule(strategy: str, scope: str | None) -> None:
+    """The evaluation generator stays free of recipe imports; pin the two rules."""
+    assert generator_method_label(strategy, scope) == method_label(strategy, scope)
 
 
 def test_volume_scopes_leave_every_surface_parameter_inherited(parameter_names: list[str]) -> None:

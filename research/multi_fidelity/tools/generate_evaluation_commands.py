@@ -27,11 +27,32 @@ METHOD_BY_STRATEGY = {
     "linear_probe": "P-LP",
     "gradual_unfreeze": "P-GU",
 }
+#: Scope that leaves the method label bare, so every already-published label is
+#: unchanged. This tool stays free of recipe imports; ``test_method_label_rule``
+#: pins it to :func:`run_drivaerml_transfer_strict.method_label`.
+DEFAULT_RESET_SCOPE = "readout"
 VALID_TASKS = frozenset(("common", "full"))
 VALID_SAMPLE_SIZES = frozenset((25, 50, 100, 200, 400))
 VALID_FRAMES = frozenset(("native", "shapenet"))
 VALID_BUDGETS = frozenset(("compute_matched", "fixed_epoch", "smoke"))
 FROZEN_PROTOCOL_STATUS = "frozen_before_first_target_job"
+
+
+def method_label(strategy: str, reset_scope: str | None = None) -> str | None:
+    """Return the method label a training run with this strategy must carry.
+
+    Args:
+        strategy: Strategy recorded in the training sidecar.
+        reset_scope: Reset scope recorded in the sidecar, or ``None`` for a run
+            written before the option existed, which used the default scope.
+
+    Returns:
+        The expected label, or ``None`` for an unknown strategy.
+    """
+    base = METHOD_BY_STRATEGY.get(strategy)
+    if base is None or strategy == "scratch" or reset_scope is None or reset_scope == DEFAULT_RESET_SCOPE:
+        return base
+    return f"{base}-rs{reset_scope}"
 
 
 @dataclass(frozen=True)
@@ -130,8 +151,11 @@ def load_evaluation_cell(
 
     if task not in VALID_TASKS:
         raise ValueError(f"{sidecar_path}: unsupported task {task!r}")
-    if METHOD_BY_STRATEGY.get(strategy) != method:
-        raise ValueError(f"{sidecar_path}: strategy {strategy!r} does not imply method {method!r}")
+    if method_label(strategy, payload.get("reset_scope")) != method:
+        raise ValueError(
+            f"{sidecar_path}: strategy {strategy!r} with reset scope "
+            f"{payload.get('reset_scope')!r} does not imply method {method!r}"
+        )
     if not isinstance(replicate, int) or isinstance(replicate, bool) or replicate not in range(8):
         raise ValueError(f"{sidecar_path}: replicate must be an integer in [0, 7]")
     if not isinstance(sample_size, int) or isinstance(sample_size, bool) or sample_size not in VALID_SAMPLE_SIZES:

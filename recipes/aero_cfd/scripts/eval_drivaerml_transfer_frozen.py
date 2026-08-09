@@ -29,6 +29,7 @@ from recipes.aero_cfd.scripts.run_drivaerml_transfer_strict import (
     CHECKPOINT_ARCHITECTURE,
     FIELD_WEIGHTS,
     METHOD_BY_STRATEGY,
+    method_label,
     MODEL_KIND,
     PROVENANCE_FILENAME,
     TASKS,
@@ -147,9 +148,15 @@ def _load_training_provenance(
             raise ValueError(f"training provenance mismatch for {key}: expected={requested!r}, actual={recorded!r}")
 
     strategy = sidecar.get("strategy")
-    if METHOD_BY_STRATEGY.get(strategy) != sidecar.get("method"):
+    # Sidecars written before the reset-scope option have no such key and were
+    # all trained at the default scope, which method_label maps to the bare
+    # strategy label.
+    if strategy not in METHOD_BY_STRATEGY or method_label(strategy, sidecar.get("reset_scope")) != sidecar.get(
+        "method"
+    ):
         raise ValueError(
-            f"training provenance strategy/method mismatch: strategy={strategy!r}, method={sidecar.get('method')!r}"
+            f"training provenance strategy/method mismatch: strategy={strategy!r}, "
+            f"reset_scope={sidecar.get('reset_scope')!r}, method={sidecar.get('method')!r}"
         )
     source_checkpoint = sidecar.get("source_checkpoint")
     source_checkpoint_sha256 = sidecar.get("source_checkpoint_sha256")
